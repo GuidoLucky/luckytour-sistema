@@ -2044,22 +2044,33 @@ function Documentos() {
   async function enviar(r, tipo) {
     setSaving(true);
     setMsgEnvio("");
-    const asunto = tipo === "confirmacion"
-      ? "✅ Confirmación de reserva — " + (r.proveedor_nombre || r.destino)
-      : "🎫 Voucher de viaje — " + (r.proveedor_nombre || r.destino);
 
-    // Mandar PDF adjunto via endpoint Python
     let mailOk = false;
     if (r.pasajero_mail) {
       try {
-        const resp = await fetch("/api/send-doc", {
+        // 1) Python genera el PDF
+        const pdfResp = await fetch("/api/send-doc", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ tipo, to: r.pasajero_mail, reserva: r }),
+          body: JSON.stringify({ tipo, reserva: r }),
         });
-        const data = await resp.json();
-        mailOk = data.ok === true;
-        if (!mailOk) setMsgEnvio("⚠️ Error al enviar: " + (data.error || "desconocido"));
+        const pdfData = await pdfResp.json();
+        if (!pdfData.ok) throw new Error(pdfData.error || "Error generando PDF");
+
+        // 2) JS envía el mail con el PDF adjunto
+        const mailResp = await fetch("/api/send-email", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            to: r.pasajero_mail,
+            subject: pdfData.subject,
+            html: `<p>Hola <b>${pdfData.nombre}</b>,</p><p>Adjuntamos tu documento de viaje.</p><p>Cualquier consulta no dudes en contactarnos.<br><b>Lucky Tour Viajes</b></p>`,
+            attachment: { filename: pdfData.filename, content: pdfData.pdf },
+          }),
+        });
+        const mailData = await mailResp.json();
+        mailOk = mailData.ok === true;
+        if (!mailOk) setMsgEnvio("⚠️ Error al enviar: " + (mailData.error || "desconocido"));
         else setMsgEnvio("✅ PDF enviado a " + r.pasajero_mail);
       } catch(e) {
         setMsgEnvio("⚠️ Error: " + e.message);
