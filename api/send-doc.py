@@ -184,8 +184,13 @@ def _send_resend(to, subject, nombre, pdf_bytes, filename):
         headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
         method="POST"
     )
-    with urllib.request.urlopen(req) as resp:
-        return json.loads(resp.read())
+    import urllib.error
+    try:
+        with urllib.request.urlopen(req) as resp:
+            return json.loads(resp.read())
+    except urllib.error.HTTPError as e:
+        body = e.read().decode('utf-8', errors='replace')
+        raise Exception(f'Resend {e.code}: {body}')
 
 
 class handler(BaseHTTPRequestHandler):
