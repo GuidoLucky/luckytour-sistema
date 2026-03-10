@@ -1371,6 +1371,111 @@ function TabCC() {
   );
 }
 
+function ModalEditarMovimiento({ mov, onSave, onClose }) {
+  const [f, setF] = useState({
+    fecha: mov.fecha || hoy(),
+    monto_origen: String(mov.monto_origen || ""),
+    moneda_origen: mov.moneda_origen || "USD",
+    tc: String(mov.tc || "1"),
+    concepto: mov.concepto || "",
+    reserva_cod: mov.reserva_cod || "",
+    cliente_nombre: mov.cliente_nombre || "",
+  });
+  const [saving, setSaving] = useState(false);
+  const set = (k, v) => setF(x => ({ ...x, [k]: v }));
+
+  async function guardar() {
+    if (!f.concepto || !f.monto_origen) { alert("Completá concepto y monto"); return; }
+    setSaving(true);
+    const { error } = await supabase.from("movimientos").update({
+      fecha: f.fecha,
+      monto_origen: parseFloat(f.monto_origen),
+      moneda_origen: f.moneda_origen,
+      tc: parseFloat(f.tc) || 1,
+      concepto: f.concepto,
+      reserva_cod: f.reserva_cod || null,
+      cliente_nombre: f.cliente_nombre || null,
+    }).eq("id", mov.id);
+    setSaving(false);
+    if (error) { alert("Error: " + error.message); return; }
+    onSave();
+  }
+
+  async function eliminar() {
+    if (!window.confirm("¿Eliminás este movimiento? Esta acción no revierte saldos automáticamente.")) return;
+    setSaving(true);
+    await supabase.from("movimientos").delete().eq("id", mov.id);
+    onSave();
+  }
+
+  const esCobro = mov.tipo === "cobro_cliente" || mov.tipo === "ingreso";
+  return (
+    <div style={S.modal} onClick={onClose}>
+      <div style={mbox(500)} onClick={e => e.stopPropagation()}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+          <div>
+            <div style={{ fontWeight: 700, fontSize: 16 }}>Editar movimiento</div>
+            <div style={{ fontSize: 11, marginTop: 2 }}>
+              <span style={{ padding: "2px 8px", borderRadius: 10, background: "#1e2a3a", color: MOV_C[mov.tipo] || "#94a3b8", fontSize: 10, fontWeight: 700 }}>{TIPOS_MOV[mov.tipo] || mov.tipo}</span>
+              <span style={{ fontSize: 10, color: "#4a6fa5", marginLeft: 8 }}>⚠️ Editar no ajusta saldos de reservas ni cuentas</span>
+            </div>
+          </div>
+          <button style={btnS("ghost", "sm")} onClick={onClose}>✕</button>
+        </div>
+
+        <div style={S.g2}>
+          <div style={S.fg}><label style={S.fl}>Fecha</label><input style={S.inp} type="date" value={f.fecha} onChange={e => set("fecha", e.target.value)} /></div>
+          <div style={S.fg}><label style={S.fl}>Moneda</label>
+            <select style={S.sel} value={f.moneda_origen} onChange={e => set("moneda_origen", e.target.value)}>
+              <option>USD</option><option>ARS</option><option>EUR</option>
+            </select>
+          </div>
+          <div style={S.fg}><label style={S.fl}>Monto</label><input style={S.inp} type="number" value={f.monto_origen} onChange={e => set("monto_origen", e.target.value)} /></div>
+          <div style={S.fg}><label style={S.fl}>Tipo de cambio</label><input style={S.inp} type="number" value={f.tc} onChange={e => set("tc", e.target.value)} /></div>
+        </div>
+        <div style={S.fg}><label style={S.fl}>Concepto</label><input style={S.inp} value={f.concepto} onChange={e => set("concepto", e.target.value)} /></div>
+        <div style={S.g2}>
+          <div style={S.fg}><label style={S.fl}>Código de reserva</label><input style={S.inp} value={f.reserva_cod} onChange={e => set("reserva_cod", e.target.value)} placeholder="LT-2026-XXX" /></div>
+          {esCobro && <div style={S.fg}><label style={S.fl}>Nombre cliente</label><input style={S.inp} value={f.cliente_nombre} onChange={e => set("cliente_nombre", e.target.value)} /></div>}
+        </div>
+
+        <div style={{ display: "flex", justifyContent: "space-between", marginTop: 8 }}>
+          <button style={{ ...btnS("ghost", "sm"), color: "#ef4444", borderColor: "#ef444433" }} onClick={eliminar} disabled={saving}>🗑 Eliminar</button>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button style={btnS("ghost")} onClick={onClose}>Cancelar</button>
+            <button style={{ ...btnS("pri"), opacity: saving ? 0.7 : 1 }} onClick={guardar} disabled={saving}>{saving ? "Guardando..." : "✓ Guardar"}</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TabMovimientos({ movimientos, onSave }) {
+  const [editando, setEditando] = useState(null);
+  return (
+    <div>
+      <Tabla
+        cols={["Fecha", "Tipo", "Concepto", "Monto", "Reserva", ""]}
+        rows={movimientos.map(m => {
+          const esCobro = m.tipo === "cobro_cliente" || m.tipo === "ingreso";
+          return (
+            <tr key={m.id}>
+              <td style={{ ...S.td, fontSize: 11, color: "#7a9cc8" }}>{fmtD(m.fecha)}</td>
+              <td style={S.td}><span style={{ fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 10, background: "#1e2a3a", color: MOV_C[m.tipo] || "#94a3b8" }}>{TIPOS_MOV[m.tipo] || m.tipo}</span></td>
+              <td style={{ ...S.td, fontSize: 11, maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.concepto}</td>
+              <td style={{ ...S.td, fontWeight: 700, color: esCobro ? "#10b981" : "#ef4444" }}>{esCobro ? "+" : "-"}{fmt(m.monto_origen, m.moneda_origen)}</td>
+              <td style={{ ...S.td, fontSize: 11, color: "#c9a84c", fontFamily: "monospace" }}>{m.reserva_cod || "—"}</td>
+              <td style={S.td}><button style={btnS("ghost", "sm")} onClick={() => setEditando(m)}>Editar</button></td>
+            </tr>
+          );
+        })}
+      />
+      {editando && <ModalEditarMovimiento mov={editando} onSave={() => { setEditando(null); onSave(); }} onClose={() => setEditando(null)} />}
+    </div>
+  );
+}
+
 // ══ FINANZAS ══
 function Finanzas({ cuentasBancarias, proveedores, user, onSave }) {
   const [movimientos, setMovimientos] = useState([]);
@@ -1503,7 +1608,10 @@ function Finanzas({ cuentasBancarias, proveedores, user, onSave }) {
 
       {subPage === "cc" && <TabCC />}
 
-      {subPage === "movimientos" && (loading ? <Spinner /> : <Tabla cols={["Fecha", "Tipo", "Concepto", "Monto", "Reserva"]} rows={movimientos.map(m => { const esCobro = m.tipo === "cobro_cliente" || m.tipo === "ingreso"; return <tr key={m.id}><td style={{ ...S.td, fontSize: 11, color: "#7a9cc8" }}>{fmtD(m.fecha)}</td><td style={S.td}><span style={{ fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 10, background: "#1e2a3a", color: MOV_C[m.tipo] || "#94a3b8" }}>{TIPOS_MOV[m.tipo] || m.tipo}</span></td><td style={{ ...S.td, fontSize: 11, maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.concepto}</td><td style={{ ...S.td, fontWeight: 700, color: esCobro ? "#10b981" : "#ef4444" }}>{esCobro ? "+" : "-"}{fmt(m.monto_origen, m.moneda_origen)}</td><td style={{ ...S.td, fontSize: 11, color: "#c9a84c", fontFamily: "monospace" }}>{m.reserva_cod || "—"}</td></tr>; })} />)}
+      {subPage === "movimientos" && (
+        loading ? <Spinner /> : 
+        <TabMovimientos movimientos={movimientos} proveedores={proveedores} cuentasBancarias={cuentasBancarias} onSave={() => { cargar(); if (onSave) onSave(); }} />
+      )}
 
       {subPage === "bancos" && <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(240px,1fr))", gap: 14 }}>{cuentasBancarias.map(c => <div key={c.id} style={{ ...S.card, borderColor: (c.saldo || 0) < 0 ? "#ef444433" : "#1e3a5f" }}><div style={{ fontWeight: 700, fontSize: 14, marginBottom: 2 }}>{c.nombre}</div><div style={{ fontSize: 10, color: "#4a6fa5", marginBottom: 10, textTransform: "capitalize" }}>{c.tipo} · {c.moneda}</div><div style={{ fontSize: 22, fontWeight: 800, color: (c.saldo || 0) >= 0 ? "#10b981" : "#ef4444" }}>{fmt(c.saldo || 0, c.moneda)}</div></div>)}</div>}
 
