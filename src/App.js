@@ -910,7 +910,7 @@ function Clientes() {
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState("");
   const [modal, setModal] = useState(null);
-  const cargar = useCallback(async () => { setLoading(true); const { data } = await supabase.from("clientes").select("*").order("apellido"); setClientes(data || []); setLoading(false); }, []);
+  const cargar = useCallback(async () => { setLoading(true); const { data } = await supabase.from("clientes").select("*").order("apellido").limit(5000); setClientes(data || []); setLoading(false); }, []);
   useEffect(() => { cargar(); }, [cargar]);
   const lista = clientes.filter(c => !q || (c.nombre + " " + c.apellido).toLowerCase().includes(q.toLowerCase()) || (c.dni || "").includes(q) || (c.mail || "").toLowerCase().includes(q.toLowerCase()));
   return (
@@ -2000,7 +2000,7 @@ export default function App() {
       supabase.from("cuentas_bancarias").select("*").order("nombre"),
       supabase.from("reservas").select("*").order("created_at", { ascending: false }),
       supabase.from("movimientos").select("*").order("fecha", { ascending: false }).limit(20),
-      supabase.from("clientes").select("*").order("apellido"),
+      supabase.from("clientes").select("*").order("apellido").limit(5000),
     ]).then(function([{ data: p }, { data: cb }, { data: r }, { data: m }, { data: c }]) {
       setProveedores(p || []);
       setCuentasBancarias(cb || []);
