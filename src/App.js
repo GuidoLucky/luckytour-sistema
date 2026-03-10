@@ -1112,86 +1112,88 @@ function ModalMovimiento({ proveedores, cuentasBancarias, user, onSave, onClose 
   const [f, setF] = useState({ tipo: "cobro_cliente", fecha: hoy(), desde_cuenta_id: "", monto_origen: "", moneda_origen: "USD", tc: "1", proveedor_id: "", cuenta_proveedor_id: "", cliente_nombre: "", concepto: "", reserva_cod: "" });
   const [saving, setSaving] = useState(false);
   const [reservasPendientes, setReservasPendientes] = useState([]);
-  const [reservaSel, setReservaSel] = useState(null);
+  const [reservasSel, setReservasSel] = useState([]); // multi-select
   const set = (k, v) => setF(x => ({ ...x, [k]: v }));
   const provSel = proveedores.find(p => String(p.id) === String(f.proveedor_id));
 
-  // Cargar reservas pendientes según tipo
   useEffect(() => {
+    setReservasSel([]);
     if (f.tipo === "pago_proveedor" && f.proveedor_id) {
       supabase.from("reservas")
         .select("id,codigo,pasajero_nombre,destino,moneda,neto,saldo_pendiente,fecha_in,cod_proveedor")
         .eq("proveedor_id", parseInt(f.proveedor_id))
-        .not("saldo_pendiente", "is", null)
-        .gt("saldo_pendiente", 0)
-        .not("estado", "in", "(Cancelada,Cerrada)")
-        .order("fecha_in")
+        .not("saldo_pendiente", "is", null).gt("saldo_pendiente", 0)
+        .not("estado", "in", "(Cancelada,Cerrada)").order("fecha_in")
         .then(({ data }) => setReservasPendientes(data || []));
     } else if (f.tipo === "cobro_cliente") {
-      // Cargar reservas activas con cobro pendiente
       supabase.from("reservas")
         .select("id,codigo,pasajero_nombre,destino,moneda,neto,venta,fecha_in,estado,cod_proveedor")
-        .not("estado", "in", "(Cancelada,Cerrada,Pagada)")
-        .not("venta", "is", null)
-        .order("fecha_in")
+        .not("estado", "in", "(Cancelada,Cerrada,Pagada)").not("venta", "is", null).order("fecha_in")
         .then(async ({ data: reservasList }) => {
           if (!reservasList) return setReservasPendientes([]);
-          // Para cada reserva, calcular cuánto se cobró ya
-          const { data: movs } = await supabase.from("movimientos")
-            .select("reserva_cod,monto_origen,moneda_origen,tc")
-            .eq("tipo", "cobro_cliente");
-          const cobradoPorReserva = {};
-          (movs || []).forEach(m => {
-            if (!m.reserva_cod) return;
-            cobradoPorReserva[m.reserva_cod] = (cobradoPorReserva[m.reserva_cod] || 0) + (m.monto_origen || 0);
-          });
-          const conPendiente = reservasList.map(r => ({
-            ...r,
-            cobrado: cobradoPorReserva[r.codigo] || 0,
-            pendiente_cobro: Math.max(0, (r.venta || 0) - (cobradoPorReserva[r.codigo] || 0)),
-          })).filter(r => r.pendiente_cobro > 0);
+          const { data: movs } = await supabase.from("movimientos").select("reserva_cod,monto_origen").eq("tipo", "cobro_cliente");
+          const cobradoPor = {};
+          (movs || []).forEach(m => { if (m.reserva_cod) cobradoPor[m.reserva_cod] = (cobradoPor[m.reserva_cod] || 0) + (m.monto_origen || 0); });
+          const conPendiente = reservasList.map(r => ({ ...r, cobrado: cobradoPor[r.codigo] || 0, pendiente_cobro: Math.max(0, (r.venta || 0) - (cobradoPor[r.codigo] || 0)) })).filter(r => r.pendiente_cobro > 0);
           setReservasPendientes(conPendiente);
         });
     } else {
       setReservasPendientes([]);
-      setReservaSel(null);
     }
   }, [f.proveedor_id, f.tipo]);
 
-  function selReserva(r) {
-    setReservaSel(r);
-    if (f.tipo === "pago_proveedor") {
-      set("moneda_origen", r.moneda);
-      set("monto_origen", String(r.saldo_pendiente));
-      set("reserva_cod", r.codigo);
-      set("concepto", "Pago a " + (provSel?.nombre || "") + " — " + r.codigo + " · " + r.pasajero_nombre);
-    } else if (f.tipo === "cobro_cliente") {
-      set("moneda_origen", r.moneda);
-      set("monto_origen", String(r.pendiente_cobro));
-      set("reserva_cod", r.codigo);
-      set("cliente_nombre", r.pasajero_nombre);
-      set("concepto", "Cobro — " + r.codigo + " · " + r.pasajero_nombre + " · " + r.destino);
-    }
+  // Toggle reserva en la selección múltiple
+  function toggleReserva(r) {
+    setReservasSel(prev => {
+      const yaEsta = prev.find(x => x.id === r.id);
+      const nueva = yaEsta ? prev.filter(x => x.id !== r.id) : [...prev, r];
+      // Recalcular monto total y concepto
+      const total = nueva.reduce((s, x) => s + (f.tipo === "pago_proveedor" ? (x.saldo_pendiente || 0) : (x.pendiente_cobro || 0)), 0);
+      const moneda = nueva.length > 0 ? nueva[0].moneda : f.moneda_origen;
+      const codigos = nueva.map(x => x.codigo).join(", ");
+      const nombres = [...new Set(nueva.map(x => x.pasajero_nombre))].join(", ");
+      const concepto = f.tipo === "pago_proveedor"
+        ? "Pago a " + (provSel?.nombre || "") + " — " + codigos
+        : "Cobro — " + codigos + " · " + nombres;
+      setF(x => ({ ...x, monto_origen: total > 0 ? String(total) : "", moneda_origen: moneda, reserva_cod: nueva.length === 1 ? nueva[0].codigo : codigos, concepto, cliente_nombre: f.tipo === "cobro_cliente" ? nombres : x.cliente_nombre }));
+      return nueva;
+    });
   }
 
-  // Calcular monto en moneda de la reserva para mostrar al usuario
-  const montoEnMonedaReserva = () => {
-    if (!f.monto_origen || !reservaSel) return null;
-    const monto = parseFloat(f.monto_origen);
+  // Calcular cómo se distribuye el monto entre las reservas seleccionadas
+  function calcularDistribucion() {
+    if (!reservasSel.length || !f.monto_origen) return [];
     const tc = parseFloat(f.tc) || 1;
-    if (f.moneda_origen === reservaSel.moneda) return monto;
-    // Si pago en ARS y reserva en USD: divido por TC
-    if (f.moneda_origen === "ARS" && reservaSel.moneda === "USD") return monto / tc;
-    // Si pago en USD y reserva en ARS: multiplico por TC
-    if (f.moneda_origen === "USD" && reservaSel.moneda === "ARS") return monto * tc;
-    return monto / tc;
-  };
+    let montoRest = parseFloat(f.monto_origen);
+    // Convertir a moneda de las reservas si hace falta
+    const monedaRes = reservasSel[0].moneda;
+    if (f.moneda_origen !== monedaRes) {
+      if (f.moneda_origen === "ARS" && monedaRes === "USD") montoRest = montoRest / tc;
+      else if (f.moneda_origen === "USD" && monedaRes === "ARS") montoRest = montoRest * tc;
+    }
+    return reservasSel.map((r, i) => {
+      const pendiente = f.tipo === "pago_proveedor" ? (r.saldo_pendiente || 0) : (r.pendiente_cobro || 0);
+      const esUltima = i === reservasSel.length - 1;
+      if (esUltima) {
+        // La última absorbe el resto (puede ser parcial o con saldo a favor)
+        const nuevoSaldo = pendiente - montoRest;
+        return { r, paga: montoRest, nuevoSaldo };
+      } else {
+        const paga = Math.min(montoRest, pendiente);
+        montoRest -= paga;
+        return { r, paga, nuevoSaldo: pendiente - paga };
+      }
+    });
+  }
+
+  const distribucion = calcularDistribucion();
+  const totalSeleccionado = reservasSel.reduce((s, r) => s + (f.tipo === "pago_proveedor" ? (r.saldo_pendiente || 0) : (r.pendiente_cobro || 0)), 0);
+  const monedaSel = reservasSel.length > 0 ? reservasSel[0].moneda : null;
 
   async function guardar() {
     if (!f.concepto || !f.monto_origen) { alert("Completá concepto y monto"); return; }
     setSaving(true);
 
-    // Insertar movimiento
     const { error } = await supabase.from("movimientos").insert([{
       tipo: f.tipo, fecha: f.fecha,
       desde_cuenta_id: f.desde_cuenta_id || null,
@@ -1208,21 +1210,26 @@ function ModalMovimiento({ proveedores, cuentasBancarias, user, onSave, onClose 
 
     if (error) { setSaving(false); alert("Error: " + error.message); return; }
 
-    // Si es pago a proveedor con reserva seleccionada
-    if (f.tipo === "pago_proveedor" && reservaSel) {
-      const montoDesc = montoEnMonedaReserva() || parseFloat(f.monto_origen);
-      const nuevoSaldo = Math.max(0, (reservaSel.saldo_pendiente || 0) - montoDesc);
-      const nuevoEstado = nuevoSaldo <= 0 ? "Pagada" : null;
-
-      const upd = { saldo_pendiente: nuevoSaldo };
-      if (nuevoEstado) upd.estado = nuevoEstado;
-      await supabase.from("reservas").update(upd).eq("id", reservaSel.id);
-
-      // Actualizar saldo cuenta proveedor
-      if (f.cuenta_proveedor_id) {
-        const { data: cp } = await supabase.from("cuentas_proveedor").select("saldo").eq("id", f.cuenta_proveedor_id).single();
-        if (cp) await supabase.from("cuentas_proveedor").update({ saldo: (cp.saldo || 0) + montoDesc }).eq("id", f.cuenta_proveedor_id);
+    // Actualizar saldos de cada reserva según distribución
+    for (const { r, paga, nuevoSaldo } of distribucion) {
+      if (f.tipo === "pago_proveedor") {
+        const upd = { saldo_pendiente: Math.max(nuevoSaldo, 0) };
+        if (nuevoSaldo <= 0) upd.estado = "Pagada";
+        await supabase.from("reservas").update(upd).eq("id", r.id);
+        // Actualizar saldo cuenta proveedor
+        if (f.cuenta_proveedor_id) {
+          const { data: cp } = await supabase.from("cuentas_proveedor").select("saldo").eq("id", f.cuenta_proveedor_id).single();
+          if (cp) await supabase.from("cuentas_proveedor").update({ saldo: (cp.saldo || 0) + paga }).eq("id", f.cuenta_proveedor_id);
+        }
       }
+      // Para cobro_cliente el saldo se maneja vía movimientos, no hay campo en reservas
+    }
+
+    // Si no hay reservas seleccionadas pero es pago_proveedor con cuenta, igual actualizar
+    if (f.tipo === "pago_proveedor" && reservasSel.length === 0 && f.cuenta_proveedor_id) {
+      const montoDesc = parseFloat(f.monto_origen);
+      const { data: cp } = await supabase.from("cuentas_proveedor").select("saldo").eq("id", f.cuenta_proveedor_id).single();
+      if (cp) await supabase.from("cuentas_proveedor").update({ saldo: (cp.saldo || 0) + montoDesc }).eq("id", f.cuenta_proveedor_id);
     }
 
     // Actualizar saldo cuenta bancaria
@@ -1239,9 +1246,11 @@ function ModalMovimiento({ proveedores, cuentasBancarias, user, onSave, onClose 
     onSave();
   }
 
+  const busqKey = f.tipo === "pago_proveedor" ? "_busqPago" : "_busqCobro";
+
   return (
     <div style={S.modal} onClick={onClose}>
-      <div style={mbox(640)} onClick={e => e.stopPropagation()}>
+      <div style={mbox(660)} onClick={e => e.stopPropagation()}>
         <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 18 }}>
           <div style={{ fontWeight: 700, fontSize: 16 }}>Nuevo movimiento</div>
           <button style={btnS("ghost", "sm")} onClick={onClose}>✕</button>
@@ -1249,7 +1258,7 @@ function ModalMovimiento({ proveedores, cuentasBancarias, user, onSave, onClose 
 
         <div style={S.g2}>
           <div style={S.fg}><label style={S.fl}>Tipo</label>
-            <select style={S.sel} value={f.tipo} onChange={e => { set("tipo", e.target.value); setReservaSel(null); }}>
+            <select style={S.sel} value={f.tipo} onChange={e => { set("tipo", e.target.value); setReservasSel([]); }}>
               {Object.entries(TIPOS_MOV).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
             </select>
           </div>
@@ -1261,7 +1270,7 @@ function ModalMovimiento({ proveedores, cuentasBancarias, user, onSave, onClose 
           <div>
             <div style={S.g2}>
               <div style={S.fg}><label style={S.fl}>Proveedor</label>
-                <select style={S.sel} value={f.proveedor_id} onChange={e => { set("proveedor_id", e.target.value); set("cuenta_proveedor_id", ""); setReservaSel(null); }}>
+                <select style={S.sel} value={f.proveedor_id} onChange={e => { set("proveedor_id", e.target.value); set("cuenta_proveedor_id", ""); setReservasSel([]); }}>
                   <option value="">Seleccionar...</option>
                   {proveedores.map(p => <option key={p.id} value={p.id}>{p.nombre}</option>)}
                 </select>
@@ -1273,63 +1282,71 @@ function ModalMovimiento({ proveedores, cuentasBancarias, user, onSave, onClose 
                 </select>
               </div>
             </div>
-
-            {/* RESERVAS PENDIENTES */}
             {reservasPendientes.length > 0 && (
               <div style={{ marginBottom: 14 }}>
-                <label style={S.fl}>Reservas pendientes de pago ({reservasPendientes.length})</label>
-                <input style={{ ...S.inp, marginBottom: 4 }} placeholder="Buscar por pasajero, código o destino..." value={f._busqPago || ""} onChange={e => set("_busqPago", e.target.value)} />
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <label style={S.fl}>Reservas pendientes — seleccioná una o varias</label>
+                  {reservasSel.length > 0 && <span style={{ fontSize: 10, color: "#c9a84c" }}>{reservasSel.length} seleccionadas · {fmt(totalSeleccionado, monedaSel)}</span>}
+                </div>
+                <input style={{ ...S.inp, marginBottom: 4 }} placeholder="Buscar..." value={f[busqKey] || ""} onChange={e => set(busqKey, e.target.value)} />
                 <div style={{ maxHeight: 200, overflowY: "auto", border: "1px solid #1e3a5f", borderRadius: 8 }}>
-                  {reservasPendientes.filter(r => {
-                    const s = (f._busqPago || "").toLowerCase();
-                    return !s || (r.pasajero_nombre || "").toLowerCase().includes(s) || (r.codigo || "").toLowerCase().includes(s) || (r.destino || "").toLowerCase().includes(s);
-                  }).map(r => (
-                    <div key={r.id} onClick={() => selReserva(r)} style={{ padding: "10px 14px", cursor: "pointer", borderBottom: "1px solid #0f2040", background: reservaSel?.id === r.id ? "#1e3a5f" : "transparent", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                      <div>
-                        <span style={{ fontFamily: "monospace", fontSize: 11, color: "#c9a84c" }}>{r.codigo}</span>
-                        <span style={{ fontSize: 12, marginLeft: 8 }}>{r.pasajero_nombre}</span>
-                        <div style={{ fontSize: 10, color: "#7a9cc8" }}>{r.destino} · {fmtD(r.fecha_in)}{r.cod_proveedor && <span style={{ color: "#c9a84c", marginLeft: 6 }}>🏷 {r.cod_proveedor}</span>}</div>
+                  {reservasPendientes.filter(r => { const s = (f[busqKey] || "").toLowerCase(); return !s || (r.pasajero_nombre || "").toLowerCase().includes(s) || (r.codigo || "").toLowerCase().includes(s); }).map(r => {
+                    const sel = reservasSel.find(x => x.id === r.id);
+                    return (
+                      <div key={r.id} onClick={() => toggleReserva(r)} style={{ padding: "10px 14px", cursor: "pointer", borderBottom: "1px solid #0f2040", background: sel ? "#0a2040" : "transparent", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                          <div style={{ width: 16, height: 16, borderRadius: 4, border: "2px solid " + (sel ? "#3b82f6" : "#1e3a5f"), background: sel ? "#3b82f6" : "transparent", flexShrink: 0 }} />
+                          <div>
+                            <span style={{ fontFamily: "monospace", fontSize: 11, color: "#c9a84c" }}>{r.codigo}</span>
+                            <span style={{ fontSize: 12, marginLeft: 8 }}>{r.pasajero_nombre}</span>
+                            <div style={{ fontSize: 10, color: "#7a9cc8" }}>{r.destino} · {fmtD(r.fecha_in)}{r.cod_proveedor && <span style={{ color: "#c9a84c", marginLeft: 6 }}>🏷 {r.cod_proveedor}</span>}</div>
+                          </div>
+                        </div>
+                        <div style={{ textAlign: "right" }}>
+                          <div style={{ fontSize: 12, fontWeight: 700, color: "#ef4444" }}>{fmt(r.saldo_pendiente, r.moneda)}</div>
+                          {r.saldo_pendiente < r.neto && <div style={{ fontSize: 9, color: "#4a6fa5" }}>de {fmt(r.neto, r.moneda)}</div>}
+                        </div>
                       </div>
-                      <div style={{ textAlign: "right" }}>
-                        <div style={{ fontSize: 12, fontWeight: 700, color: "#ef4444" }}>{fmt(r.saldo_pendiente, r.moneda)}</div>
-                        {r.saldo_pendiente < r.neto && <div style={{ fontSize: 9, color: "#4a6fa5" }}>de {fmt(r.neto, r.moneda)}</div>}
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
             )}
-            {f.proveedor_id && reservasPendientes.length === 0 && (
-              <div style={{ fontSize: 11, color: "#10b981", marginBottom: 14 }}>✅ Sin deudas pendientes con este proveedor</div>
-            )}
+            {f.proveedor_id && reservasPendientes.length === 0 && <div style={{ fontSize: 11, color: "#10b981", marginBottom: 14 }}>✅ Sin deudas pendientes</div>}
           </div>
         )}
 
         {/* COBRO A CLIENTE */}
         {f.tipo === "cobro_cliente" && (
           <div>
-            <div style={S.fg}><label style={S.fl}>Cliente (nombre libre)</label><input style={S.inp} value={f.cliente_nombre} onChange={e => set("cliente_nombre", e.target.value)} placeholder="O seleccioná una reserva abajo..." /></div>
+            <div style={S.fg}><label style={S.fl}>Cliente</label><input style={S.inp} value={f.cliente_nombre} onChange={e => set("cliente_nombre", e.target.value)} placeholder="Nombre del cliente..." /></div>
             {reservasPendientes.length > 0 && (
               <div style={{ marginBottom: 14 }}>
-                <label style={S.fl}>Reservas con cobro pendiente ({reservasPendientes.length})</label>
-                <input style={{ ...S.inp, marginBottom: 4 }} placeholder="Buscar por pasajero, código o destino..." value={f._busqCobro || ""} onChange={e => set("_busqCobro", e.target.value)} />
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <label style={S.fl}>Reservas con cobro pendiente — seleccioná una o varias</label>
+                  {reservasSel.length > 0 && <span style={{ fontSize: 10, color: "#c9a84c" }}>{reservasSel.length} seleccionadas · {fmt(totalSeleccionado, monedaSel)}</span>}
+                </div>
+                <input style={{ ...S.inp, marginBottom: 4 }} placeholder="Buscar..." value={f[busqKey] || ""} onChange={e => set(busqKey, e.target.value)} />
                 <div style={{ maxHeight: 200, overflowY: "auto", border: "1px solid #1e3a5f", borderRadius: 8 }}>
-                  {reservasPendientes.filter(r => {
-                    const s = (f._busqCobro || "").toLowerCase();
-                    return !s || (r.pasajero_nombre || "").toLowerCase().includes(s) || (r.codigo || "").toLowerCase().includes(s) || (r.destino || "").toLowerCase().includes(s);
-                  }).map(r => (
-                    <div key={r.id} onClick={() => selReserva(r)} style={{ padding: "10px 14px", cursor: "pointer", borderBottom: "1px solid #0f2040", background: reservaSel?.id === r.id ? "#1e3a5f" : "transparent", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                      <div>
-                        <span style={{ fontFamily: "monospace", fontSize: 11, color: "#c9a84c" }}>{r.codigo}</span>
-                        <span style={{ fontSize: 12, marginLeft: 8 }}>{r.pasajero_nombre}</span>
-                        <div style={{ fontSize: 10, color: "#7a9cc8" }}>{r.destino} · {fmtD(r.fecha_in)}{r.cod_proveedor && <span style={{ color: "#c9a84c", marginLeft: 6 }}>🏷 {r.cod_proveedor}</span>}</div>
+                  {reservasPendientes.filter(r => { const s = (f[busqKey] || "").toLowerCase(); return !s || (r.pasajero_nombre || "").toLowerCase().includes(s) || (r.codigo || "").toLowerCase().includes(s); }).map(r => {
+                    const sel = reservasSel.find(x => x.id === r.id);
+                    return (
+                      <div key={r.id} onClick={() => toggleReserva(r)} style={{ padding: "10px 14px", cursor: "pointer", borderBottom: "1px solid #0f2040", background: sel ? "#0a2040" : "transparent", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                          <div style={{ width: 16, height: 16, borderRadius: 4, border: "2px solid " + (sel ? "#3b82f6" : "#1e3a5f"), background: sel ? "#3b82f6" : "transparent", flexShrink: 0 }} />
+                          <div>
+                            <span style={{ fontFamily: "monospace", fontSize: 11, color: "#c9a84c" }}>{r.codigo}</span>
+                            <span style={{ fontSize: 12, marginLeft: 8 }}>{r.pasajero_nombre}</span>
+                            <div style={{ fontSize: 10, color: "#7a9cc8" }}>{r.destino} · {fmtD(r.fecha_in)}{r.cod_proveedor && <span style={{ color: "#c9a84c", marginLeft: 6 }}>🏷 {r.cod_proveedor}</span>}</div>
+                          </div>
+                        </div>
+                        <div style={{ textAlign: "right" }}>
+                          <div style={{ fontSize: 12, fontWeight: 700, color: "#10b981" }}>{fmt(r.pendiente_cobro, r.moneda)}</div>
+                          <div style={{ fontSize: 9, color: "#4a6fa5" }}>de {fmt(r.venta, r.moneda)}</div>
+                        </div>
                       </div>
-                      <div style={{ textAlign: "right" }}>
-                        <div style={{ fontSize: 12, fontWeight: 700, color: "#10b981" }}>{fmt(r.pendiente_cobro, r.moneda)}</div>
-                        <div style={{ fontSize: 9, color: "#4a6fa5" }}>de {fmt(r.venta, r.moneda)} · cobrado {fmt(r.cobrado, r.moneda)}</div>
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
             )}
@@ -1349,7 +1366,7 @@ function ModalMovimiento({ proveedores, cuentasBancarias, user, onSave, onClose 
               <option>USD</option><option>ARS</option><option>EUR</option>
             </select>
           </div>
-          <div style={S.fg}><label style={S.fl}>Monto</label>
+          <div style={S.fg}><label style={S.fl}>Monto {reservasSel.length > 0 && <span style={{ color: "#4a6fa5", fontWeight: 400 }}>(total sugerido: {fmt(totalSeleccionado, monedaSel)})</span>}</label>
             <input style={S.inp} type="number" value={f.monto_origen} onChange={e => set("monto_origen", e.target.value)} placeholder="0.00" />
           </div>
           <div style={S.fg}><label style={S.fl}>Tipo de cambio</label>
@@ -1357,20 +1374,20 @@ function ModalMovimiento({ proveedores, cuentasBancarias, user, onSave, onClose 
           </div>
         </div>
 
-        {/* Mostrar equivalente si hay conversión */}
-        {reservaSel && f.moneda_origen !== reservaSel.moneda && f.monto_origen && (
-          <div style={{ padding: "8px 12px", background: "#0a2d1e", borderRadius: 8, marginBottom: 14, fontSize: 11 }}>
-            💱 Equivale a <strong style={{ color: "#10b981" }}>{fmt(montoEnMonedaReserva(), reservaSel.moneda)}</strong> — descuenta de los <strong>{fmt(reservaSel.saldo_pendiente, reservaSel.moneda)}</strong> pendientes
-          </div>
-        )}
-
-        {/* Saldo que quedaría */}
-        {reservaSel && f.monto_origen && (
-          <div style={{ padding: "8px 12px", background: "#080f1a", borderRadius: 8, marginBottom: 14, fontSize: 11 }}>
-            Saldo pendiente tras el pago: <strong style={{ color: Math.max(0, (reservaSel.saldo_pendiente || 0) - (montoEnMonedaReserva() || 0)) <= 0 ? "#10b981" : "#f59e0b" }}>
-              {fmt(Math.max(0, (reservaSel.saldo_pendiente || 0) - (montoEnMonedaReserva() || parseFloat(f.monto_origen) || 0)), reservaSel.moneda)}
-            </strong>
-            {Math.max(0, (reservaSel.saldo_pendiente || 0) - (montoEnMonedaReserva() || 0)) <= 0 && <span style={{ color: "#10b981", marginLeft: 8 }}>→ Se marcará como Pagada ✅</span>}
+        {/* Distribución entre reservas */}
+        {distribucion.length > 0 && f.monto_origen && (
+          <div style={{ padding: "12px 14px", background: "#080f1a", borderRadius: 8, marginBottom: 14, border: "1px solid #1e3a5f" }}>
+            <div style={{ fontSize: 11, fontWeight: 600, marginBottom: 8, color: "#7a9cc8" }}>Distribución del pago:</div>
+            {distribucion.map(({ r, paga, nuevoSaldo }, i) => (
+              <div key={r.id} style={{ display: "flex", justifyContent: "space-between", fontSize: 11, padding: "4px 0", borderBottom: i < distribucion.length - 1 ? "1px solid #0f2040" : "none" }}>
+                <span style={{ fontFamily: "monospace", color: "#c9a84c" }}>{r.codigo}</span>
+                <span style={{ color: "#7a9cc8" }}>{r.pasajero_nombre.split(" ")[0]}</span>
+                <span>paga <strong style={{ color: "#10b981" }}>{fmt(paga, r.moneda)}</strong></span>
+                <span style={{ color: nuevoSaldo <= 0 ? "#10b981" : nuevoSaldo < 0 ? "#3b82f6" : "#f59e0b" }}>
+                  {nuevoSaldo <= 0 ? "✅ Saldada" : nuevoSaldo < 0 ? "💰 Saldo a favor " + fmt(Math.abs(nuevoSaldo), r.moneda) : "Resta " + fmt(nuevoSaldo, r.moneda)}
+                </span>
+              </div>
+            ))}
           </div>
         )}
 
