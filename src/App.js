@@ -295,7 +295,7 @@ function CobrarASection({ clientes, f, set }) {
   );
 }
 
-
+function BuscadorCobrarA({ clientes, cobrarAId, cobrarANombre, onChange }) {
   const [busq, setBusq] = useState(cobrarANombre || "");
   const [mostrar, setMostrar] = useState(false);
   const filtrados = clientes.filter(c => {
