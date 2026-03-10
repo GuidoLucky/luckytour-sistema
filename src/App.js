@@ -81,14 +81,23 @@ function generarAlertas(reservas) {
   (reservas || []).forEach(function(r) {
     var dViaje = diasHasta(r.fecha_in);
     var dPago = diasHasta(r.vto_pago);
+    var dCobro = diasHasta(r.vto_cobro);
     var dReserva = diasHasta(r.vto_reserva);
+    var esAereo = r.tipo === "Aéreo";
     if (["Cerrada", "Cancelada"].includes(r.estado)) return;
+    // Vto pago al proveedor — todos
     if (dPago !== null && dPago <= 5 && dPago >= 0 && r.estado !== "Pagada")
       alertas.push({ id: "pago_" + r.id, tipo: "vencimiento_pago", msg: "Vence pago — " + (r.proveedor_nombre || ""), sub: r.pasajero_nombre + " · " + r.codigo, dias: dPago, urgente: dPago <= 2 });
-    if (dReserva !== null && dReserva <= 3 && dReserva >= 0)
+    // Vto cobro al cliente — todos
+    if (dCobro !== null && dCobro <= 5 && dCobro >= 0 && r.estado !== "Pagada")
+      alertas.push({ id: "cobro_" + r.id, tipo: "vencimiento_cobro", msg: "Vence cobro al cliente", sub: r.pasajero_nombre + " · " + r.codigo, dias: dCobro, urgente: dCobro <= 2 });
+    // Vto reserva — solo NO aéreos
+    if (!esAereo && dReserva !== null && dReserva <= 3 && dReserva >= 0)
       alertas.push({ id: "res_" + r.id, tipo: "vencimiento_reserva", msg: "Vence reserva en " + (dReserva === 0 ? "hoy" : dReserva + "d"), sub: r.pasajero_nombre + " · " + r.codigo, dias: dReserva, urgente: dReserva <= 1 });
+    // Viaje próximo — todos
     if (dViaje !== null && dViaje <= 7 && dViaje >= 0)
       alertas.push({ id: "viaje_" + r.id, tipo: "viaje_proximo", msg: "Viaje en " + (dViaje === 0 ? "HOY" : dViaje + " días") + " — " + r.destino, sub: r.pasajero_nombre + " · " + r.codigo, dias: dViaje, urgente: dViaje <= 2 });
+    // Sin seguro
     if (!r.seguro_compania && dViaje !== null && dViaje <= 30)
       alertas.push({ id: "seg_" + r.id, tipo: "sin_seguro", msg: "Sin seguro de viaje", sub: r.pasajero_nombre + " — " + r.destino, dias: dViaje, urgente: dViaje !== null && dViaje <= 7 });
   });
@@ -165,7 +174,7 @@ function Sidebar({ page, setPage, alertasCount, user, onLogout, collapsed, setCo
 }
 
 // ══ MODAL RESERVA ══
-const FORM_EMPTY = { codigo: "", estado: "Borrador", tipo: "Aéreo", destino: "", pasajero_nombre: "", pasajero_mail: "", pasajero_tel: "", cliente_id: null, fecha_in: "", fecha_out: "", vto_pago: "", vto_reserva: "", proveedor_id: "", proveedor_nombre: "", cuenta_proveedor_id: "", habitacion: "", adultos: 1, chd: 0, inf: 0, moneda: "USD", neto: "", venta: "", seguro_compania: "", seguro_poliza: "", seguro_desde: "", seguro_hasta: "", vendedor: "", notas: "" };
+const FORM_EMPTY = { codigo: "", estado: "Borrador", tipo: "Aéreo", destino: "", pasajero_nombre: "", pasajero_mail: "", pasajero_tel: "", cliente_id: null, fecha_in: "", fecha_out: "", vto_pago: "", vto_cobro: "", vto_reserva: "", proveedor_id: "", proveedor_nombre: "", cuenta_proveedor_id: "", habitacion: "", adultos: 1, chd: 0, inf: 0, moneda: "USD", neto: "", venta: "", seguro_compania: "", seguro_poliza: "", seguro_desde: "", seguro_hasta: "", vendedor: "", notas: "" };
 
 function ModalReserva({ reserva, proveedores, clientes, user, onSave, onClose }) {
   const esNueva = !reserva;
@@ -203,7 +212,7 @@ function ModalReserva({ reserva, proveedores, clientes, user, onSave, onClose })
       const { count } = await supabase.from("reservas").select("*", { count: "exact", head: true });
       codigo = "LT-" + new Date().getFullYear() + "-" + String((count || 0) + 1).padStart(3, "0");
     }
-    const payload = { codigo, estado: f.estado, tipo: f.tipo, destino: f.destino, cliente_id: f.cliente_id || null, pasajero_nombre: f.pasajero_nombre, pasajero_mail: f.pasajero_mail, pasajero_tel: f.pasajero_tel, fecha_in: f.fecha_in || null, fecha_out: f.fecha_out || null, vto_pago: f.vto_pago || null, vto_reserva: f.vto_reserva || null, proveedor_id: f.proveedor_id ? parseInt(f.proveedor_id) : null, proveedor_nombre: provSel?.nombre || f.proveedor_nombre || "", cuenta_proveedor_id: f.cuenta_proveedor_id || null, habitacion: f.habitacion, adultos: parseInt(f.adultos) || 1, chd: parseInt(f.chd) || 0, inf: parseInt(f.inf) || 0, moneda: f.moneda, neto: f.neto ? parseFloat(f.neto) : null, venta: f.venta ? parseFloat(f.venta) : null, seguro_compania: f.seguro_compania, seguro_poliza: f.seguro_poliza, seguro_desde: f.seguro_desde || null, seguro_hasta: f.seguro_hasta || null, vendedor: f.vendedor, vendedor_id: user?.id || null, notas: f.notas, created_by: user?.id || null };
+    const payload = { codigo, estado: f.estado, tipo: f.tipo, destino: f.destino, cliente_id: f.cliente_id || null, pasajero_nombre: f.pasajero_nombre, pasajero_mail: f.pasajero_mail, pasajero_tel: f.pasajero_tel, fecha_in: f.fecha_in || null, fecha_out: f.fecha_out || null, vto_pago: f.vto_pago || null, vto_cobro: f.vto_cobro || null, vto_reserva: f.vto_reserva || null, proveedor_id: f.proveedor_id ? parseInt(f.proveedor_id) : null, proveedor_nombre: provSel?.nombre || f.proveedor_nombre || "", cuenta_proveedor_id: f.cuenta_proveedor_id || null, habitacion: f.habitacion, adultos: parseInt(f.adultos) || 1, chd: parseInt(f.chd) || 0, inf: parseInt(f.inf) || 0, moneda: f.moneda, neto: f.neto ? parseFloat(f.neto) : null, venta: f.venta ? parseFloat(f.venta) : null, seguro_compania: f.seguro_compania, seguro_poliza: f.seguro_poliza, seguro_desde: f.seguro_desde || null, seguro_hasta: f.seguro_hasta || null, vendedor: f.vendedor, vendedor_id: user?.id || null, notas: f.notas, created_by: user?.id || null };
     let error;
     if (esNueva) { ({ error } = await supabase.from("reservas").insert([payload])); }
     else { ({ error } = await supabase.from("reservas").update(payload).eq("id", reserva.id)); }
@@ -265,8 +274,10 @@ function ModalReserva({ reserva, proveedores, clientes, user, onSave, onClose })
               <div style={S.g2}>
                 <div style={S.fg}><label style={S.fl}>Check In *</label><input style={{ ...S.inp, borderColor: err.fecha_in ? "#ef4444" : "#1e3a5f" }} type="date" value={f.fecha_in} onChange={e => set("fecha_in", e.target.value)} />{err.fecha_in && <div style={S.err}>{err.fecha_in}</div>}</div>
                 <div style={S.fg}><label style={S.fl}>Check Out</label><input style={S.inp} type="date" value={f.fecha_out} onChange={e => set("fecha_out", e.target.value)} /></div>
-                <div style={S.fg}><label style={S.fl}>Vencimiento pago</label><input style={S.inp} type="date" value={f.vto_pago} onChange={e => set("vto_pago", e.target.value)} /></div>
-                <div style={S.fg}><label style={S.fl}>Vencimiento reserva</label><input style={S.inp} type="date" value={f.vto_reserva} onChange={e => set("vto_reserva", e.target.value)} /></div>
+                <div style={S.fg}><label style={S.fl}>Vencimiento cobro (al cliente)</label><input style={S.inp} type="date" value={f.vto_cobro} onChange={e => set("vto_cobro", e.target.value)} /></div>
+                <div style={S.fg}><label style={S.fl}>Vencimiento pago (al proveedor)</label><input style={S.inp} type="date" value={f.vto_pago} onChange={e => set("vto_pago", e.target.value)} /></div>
+                {f.tipo !== "Aéreo" && <div style={S.fg}><label style={S.fl}>Vencimiento reserva</label><input style={S.inp} type="date" value={f.vto_reserva} onChange={e => set("vto_reserva", e.target.value)} /></div>}
+                {f.tipo === "Aéreo" && <div></div>}
               </div>
               <div style={S.g3}>
                 <div style={S.fg}><label style={S.fl}>Adultos</label><input style={S.inp} type="number" min="1" value={f.adultos} onChange={e => set("adultos", e.target.value)} /></div>
@@ -608,7 +619,7 @@ function Finanzas({ cuentasBancarias, proveedores, user }) {
 }
 
 // ══ ALERTAS ══
-const ALERTA_CFG = { vencimiento_pago: { icon: "💳", color: "#ef4444" }, vencimiento_reserva: { icon: "⏰", color: "#f59e0b" }, viaje_proximo: { icon: "✈️", color: "#3b82f6" }, sin_seguro: { icon: "🛡️", color: "#8b5cf6" } };
+const ALERTA_CFG = { vencimiento_pago: { icon: "💳", color: "#ef4444" }, vencimiento_cobro: { icon: "💵", color: "#f97316" }, vencimiento_reserva: { icon: "⏰", color: "#f59e0b" }, viaje_proximo: { icon: "✈️", color: "#3b82f6" }, sin_seguro: { icon: "🛡️", color: "#8b5cf6" } };
 function Alertas({ alertas, onDescartar }) {
   const urgentes = alertas.filter(a => a.urgente);
   const normales = alertas.filter(a => !a.urgente);
@@ -620,7 +631,7 @@ function Alertas({ alertas, onDescartar }) {
     <div>
       <div style={S.pt}>Alertas</div>
       <div style={S.ps}>{alertas.length} activas · {urgentes.length} urgentes</div>
-      <div style={{ display: "flex", gap: 14, marginBottom: 20, flexWrap: "wrap" }}><Stat label="Urgentes" value={urgentes.length} color="#ef4444" /><Stat label="Venc. pago" value={alertas.filter(a => a.tipo === "vencimiento_pago").length} color="#f59e0b" /><Stat label="Viajes próximos" value={alertas.filter(a => a.tipo === "viaje_proximo").length} color="#3b82f6" /><Stat label="Sin seguro" value={alertas.filter(a => a.tipo === "sin_seguro").length} color="#8b5cf6" /></div>
+      <div style={{ display: "flex", gap: 14, marginBottom: 20, flexWrap: "wrap" }}><Stat label="Urgentes" value={urgentes.length} color="#ef4444" /><Stat label="Venc. pago" value={alertas.filter(a => a.tipo === "vencimiento_pago").length} color="#ef4444" /><Stat label="Venc. cobro" value={alertas.filter(a => a.tipo === "vencimiento_cobro").length} color="#f97316" /><Stat label="Viajes próximos" value={alertas.filter(a => a.tipo === "viaje_proximo").length} color="#3b82f6" /><Stat label="Sin seguro" value={alertas.filter(a => a.tipo === "sin_seguro").length} color="#8b5cf6" /></div>
       {urgentes.length > 0 && <div style={{ marginBottom: 20 }}><div style={{ fontSize: 10, fontWeight: 700, color: "#ef4444", textTransform: "uppercase", letterSpacing: 1, marginBottom: 8 }}>🚨 Urgentes</div>{urgentes.map(a => <AlertaItem key={a.id} a={a} />)}</div>}
       {normales.length > 0 && <div><div style={{ fontSize: 10, fontWeight: 700, color: "#7a9cc8", textTransform: "uppercase", letterSpacing: 1, marginBottom: 8 }}>📋 Avisos</div>{normales.map(a => <AlertaItem key={a.id} a={a} />)}</div>}
       {alertas.length === 0 && <div style={{ ...S.card, textAlign: "center", padding: 60 }}><div style={{ fontSize: 40, marginBottom: 10 }}>✅</div><div style={{ color: "#10b981", fontWeight: 600 }}>Sin alertas activas</div></div>}
