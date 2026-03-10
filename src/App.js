@@ -809,7 +809,7 @@ function ModalCancelacion({ reserva, onConfirmar, onClose }) {
 }
 
 // ══ RESERVAS ══
-function Reservas({ proveedores, clientes, cuentasBancarias, user }) {
+function Reservas({ proveedores, clientes, cuentasBancarias, user, onSave }) {
   const [reservas, setReservas] = useState([]);
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState("");
@@ -907,14 +907,14 @@ function Reservas({ proveedores, clientes, cuentasBancarias, user }) {
           })}
         />
       )}
-      {modal && <ModalReserva reserva={modal === "nueva" ? null : modal} proveedores={proveedores} clientes={clientes} cuentasBancarias={cuentasBancarias} user={user} onSave={() => { setModal(null); cargar(); }} onClose={() => setModal(null)} />}
+      {modal && <ModalReserva reserva={modal === "nueva" ? null : modal} proveedores={proveedores} clientes={clientes} cuentasBancarias={cuentasBancarias} user={user} onSave={() => { setModal(null); cargar(); if (onSave) onSave(); }} onClose={() => setModal(null)} />}
       {confirmCancel && <ModalCancelacion reserva={confirmCancel.r} onConfirmar={(datos) => ejecutarCambioEstado(confirmCancel.r, "Cancelada", datos)} onClose={() => setConfirmCancel(null)} />}
     </div>
   );
 }
 
 // ══ CLIENTES ══
-function Clientes() {
+function Clientes({ onSave }) {
   const [clientes, setClientes] = useState([]);
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState("");
@@ -954,13 +954,13 @@ function Clientes() {
           })}
         />
       )}
-      {modal && <ModalCliente cliente={modal === "nuevo" ? null : modal} onSave={() => { setModal(null); cargar(); }} onClose={() => setModal(null)} />}
+      {modal && <ModalCliente cliente={modal === "nuevo" ? null : modal} onSave={() => { setModal(null); cargar(); if (onSave) onSave(); }} onClose={() => setModal(null)} />}
     </div>
   );
 }
 
 // ══ PROVEEDORES ══
-function Proveedores({ proveedores }) {
+function Proveedores({ proveedores, onSave }) {
   return (
     <div>
       <div style={S.pt}>Proveedores</div>
@@ -1372,7 +1372,7 @@ function TabCC() {
 }
 
 // ══ FINANZAS ══
-function Finanzas({ cuentasBancarias, proveedores, user }) {
+function Finanzas({ cuentasBancarias, proveedores, user, onSave }) {
   const [movimientos, setMovimientos] = useState([]);
   const [loading, setLoading] = useState(true);
   const [subPage, setSubPage] = useState("resumen");
@@ -1507,7 +1507,7 @@ function Finanzas({ cuentasBancarias, proveedores, user }) {
 
       {subPage === "bancos" && <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(240px,1fr))", gap: 14 }}>{cuentasBancarias.map(c => <div key={c.id} style={{ ...S.card, borderColor: (c.saldo || 0) < 0 ? "#ef444433" : "#1e3a5f" }}><div style={{ fontWeight: 700, fontSize: 14, marginBottom: 2 }}>{c.nombre}</div><div style={{ fontSize: 10, color: "#4a6fa5", marginBottom: 10, textTransform: "capitalize" }}>{c.tipo} · {c.moneda}</div><div style={{ fontSize: 22, fontWeight: 800, color: (c.saldo || 0) >= 0 ? "#10b981" : "#ef4444" }}>{fmt(c.saldo || 0, c.moneda)}</div></div>)}</div>}
 
-      {modalNuevo && <ModalMovimiento proveedores={proveedores} cuentasBancarias={cuentasBancarias} user={user} onSave={() => { setModalNuevo(false); cargar(); }} onClose={() => setModalNuevo(false)} />}
+      {modalNuevo && <ModalMovimiento proveedores={proveedores} cuentasBancarias={cuentasBancarias} user={user} onSave={() => { setModalNuevo(false); cargar(); if (onSave) onSave(); }} onClose={() => setModalNuevo(false)} />}
     </div>
   );
 }
@@ -1669,7 +1669,7 @@ function Documentos() {
 }
 
 // ══ EXPEDIENTES ══
-function Expedientes({ clientes, user }) {
+function Expedientes({ clientes, user, onSave }) {
   const [expedientes, setExpedientes] = useState([]);
   const [loading, setLoading] = useState(true);
   const [modal, setModal] = useState(null); // null | "nuevo" | expediente
@@ -1726,7 +1726,7 @@ function Expedientes({ clientes, user }) {
             );
           })
       )}
-      {modal && <ModalExpediente expediente={modal === "nuevo" ? null : modal} clientes={clientes} user={user} onSave={() => { setModal(null); cargar(); }} onClose={() => setModal(null)} />}
+      {modal && <ModalExpediente expediente={modal === "nuevo" ? null : modal} clientes={clientes} user={user} onSave={() => { setModal(null); cargar(); if (onSave) onSave(); }} onClose={() => setModal(null)} />}
       {detalle && <DetalleExpediente expediente={detalle} onClose={() => { setDetalle(null); cargar(); }} user={user} clientes={clientes} />}
     </div>
   );
@@ -1988,7 +1988,33 @@ export default function App() {
   const [cuentasBancarias, setCuentasBancarias] = useState([]);
   const [reservasDash, setReservasDash] = useState([]);
   const [movimientosDash, setMovimientosDash] = useState([]);
-  const [alertasDesc, setAlertasDesc] = useState([]);
+  const [alertasDesc, setAlertasDesc] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("alertas_desc_" + (user?.id || "x")) || "[]"); } catch { return []; }
+  });
+
+  function descartarAlerta(id) {
+    setAlertasDesc(d => {
+      const nuevo = [...d, id];
+      try { localStorage.setItem("alertas_desc_" + (user?.id || "x"), JSON.stringify(nuevo)); } catch {}
+      return nuevo;
+    });
+  }
+
+  const recargarDatos = useCallback(async () => {
+    if (!user) return;
+    const [{ data: p }, { data: cb }, { data: r }, { data: m }, { data: c }] = await Promise.all([
+      supabase.from("proveedores").select("*, cuentas_proveedor(*)").order("nombre"),
+      supabase.from("cuentas_bancarias").select("*").order("nombre"),
+      supabase.from("reservas").select("*").order("created_at", { ascending: false }),
+      supabase.from("movimientos").select("*").order("fecha", { ascending: false }).limit(20),
+      supabase.from("clientes").select("*").order("apellido").limit(5000),
+    ]);
+    setProveedores(p || []);
+    setCuentasBancarias(cb || []);
+    setReservasDash(r || []);
+    setMovimientosDash(m || []);
+    setClientes(c || []);
+  }, [user]);
 
   useEffect(() => {
     supabase.auth.getSession().then(async function({ data: { session } }) {
@@ -2004,20 +2030,8 @@ export default function App() {
 
   useEffect(() => {
     if (!user) return;
-    Promise.all([
-      supabase.from("proveedores").select("*, cuentas_proveedor(*)").order("nombre"),
-      supabase.from("cuentas_bancarias").select("*").order("nombre"),
-      supabase.from("reservas").select("*").order("created_at", { ascending: false }),
-      supabase.from("movimientos").select("*").order("fecha", { ascending: false }).limit(20),
-      supabase.from("clientes").select("*").order("apellido").limit(5000),
-    ]).then(function([{ data: p }, { data: cb }, { data: r }, { data: m }, { data: c }]) {
-      setProveedores(p || []);
-      setCuentasBancarias(cb || []);
-      setReservasDash(r || []);
-      setMovimientosDash(m || []);
-      setClientes(c || []);
-    });
-  }, [user]);
+    recargarDatos();
+  }, [user, recargarDatos]);
 
   async function handleLogout() { await supabase.auth.signOut(); setUser(null); }
 
@@ -2040,12 +2054,12 @@ export default function App() {
         </div>
         <div style={{ flex: 1, padding: 24, overflowY: "auto" }}>
           {page === "dashboard" && <Dashboard reservas={reservasDash} movimientos={movimientosDash} alertas={alertasAll} setPage={setPage} />}
-          {page === "expedientes" && <Expedientes clientes={clientes} user={user} />}
-          {page === "reservas" && <Reservas proveedores={proveedores} clientes={clientes} cuentasBancarias={cuentasBancarias} user={user} />}
-          {page === "clientes" && <Clientes />}
-          {page === "proveedores" && <Proveedores proveedores={proveedores} />}
-          {page === "finanzas" && <Finanzas cuentasBancarias={cuentasBancarias} proveedores={proveedores} user={user} />}
-          {page === "alertas" && <Alertas alertas={alertasAll} onDescartar={function(id) { setAlertasDesc(function(d) { return [...d, id]; }); }} />}
+          {page === "expedientes" && <Expedientes clientes={clientes} user={user} onSave={recargarDatos} />}
+          {page === "reservas" && <Reservas proveedores={proveedores} clientes={clientes} cuentasBancarias={cuentasBancarias} user={user} onSave={recargarDatos} />}
+          {page === "clientes" && <Clientes onSave={recargarDatos} />}
+          {page === "proveedores" && <Proveedores proveedores={proveedores} onSave={recargarDatos} />}
+          {page === "finanzas" && <Finanzas cuentasBancarias={cuentasBancarias} proveedores={proveedores} user={user} onSave={recargarDatos} />}
+          {page === "alertas" && <Alertas alertas={alertasAll} onDescartar={descartarAlerta} />}
           {page === "documentos" && <Documentos />}
         </div>
       </div>
