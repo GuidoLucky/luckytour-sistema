@@ -239,7 +239,7 @@ function Sidebar({ page, setPage, alertasCount, user, onLogout, collapsed, setCo
 }
 
 // ══ MODAL RESERVA ══
-const FORM_EMPTY = { codigo: "", estado: "Borrador", tipo: "Aéreo", destino: "", pasajero_nombre: "", pasajero_mail: "", pasajero_tel: "", cliente_id: null, fecha_in: "", fecha_out: "", vto_pago: "", vto_cobro: "", vto_reserva: "", proveedor_id: "", proveedor_nombre: "", proveedor_nombre_libre: "", cuenta_proveedor_id: "", habitacion: "", adultos: 1, chd: 0, inf: 0, moneda: "USD", neto: "", venta: "", seguro_compania: "", seguro_poliza: "", seguro_desde: "", seguro_hasta: "", vendedor: "", notas: "", ya_abonado: false, ya_abonado_cuenta_id: "", cobrar_a_cliente_id: null, cobrar_a_nombre: "", _cobrarA_cli: null };
+const FORM_EMPTY = { codigo: "", estado: "Borrador", tipo: "Aéreo", destino: "", pasajero_nombre: "", pasajero_mail: "", pasajero_tel: "", cliente_id: null, fecha_in: "", fecha_out: "", vto_pago: "", vto_cobro: "", vto_reserva: "", proveedor_id: "", proveedor_nombre: "", proveedor_nombre_libre: "", cod_proveedor: "", cuenta_proveedor_id: "", habitacion: "", adultos: 1, chd: 0, inf: 0, moneda: "USD", neto: "", venta: "", seguro_compania: "", seguro_poliza: "", seguro_desde: "", seguro_hasta: "", vendedor: "", notas: "", ya_abonado: false, ya_abonado_cuenta_id: "", cobrar_a_cliente_id: null, cobrar_a_nombre: "", _cobrarA_cli: null };
 
 function CobrarASection({ clientes, f, set }) {
   const [abierto, setAbierto] = useState(!!f.cobrar_a_cliente_id);
@@ -397,6 +397,7 @@ function ModalReserva({ reserva, proveedores, clientes, cuentasBancarias, user, 
       seguro_compania: f.seguro_compania, seguro_poliza: f.seguro_poliza,
       seguro_desde: f.seguro_desde || null, seguro_hasta: f.seguro_hasta || null,
       vendedor: f.vendedor, vendedor_id: user?.id || null, notas: f.notas,
+      cod_proveedor: f.cod_proveedor || null,
       cobrar_a_cliente_id: f.cobrar_a_cliente_id || null,
       cobrar_a_nombre: f.cobrar_a_nombre || null,
       created_by: user?.id || null,
@@ -528,6 +529,7 @@ function ModalReserva({ reserva, proveedores, clientes, cuentasBancarias, user, 
                   ? <div style={S.fg}><label style={S.fl}>Cuenta</label><select style={S.sel} value={f.cuenta_proveedor_id} onChange={e => set("cuenta_proveedor_id", e.target.value)} disabled={!cuentasSel.length}><option value="">Seleccionar...</option>{cuentasSel.map(c => <option key={c.id} value={c.id}>{c.nombre} ({c.moneda})</option>)}</select></div>
                   : <div style={S.fg}><label style={S.fl}>Nombre del proveedor *</label><input style={S.inp} value={f.proveedor_nombre_libre || ""} onChange={e => set("proveedor_nombre_libre", e.target.value)} placeholder="Ej: American Airlines web, Booking.com..." /></div>
                 }
+                <div style={S.fg}><label style={S.fl}>Código de reserva del proveedor</label><input style={S.inp} value={f.cod_proveedor || ""} onChange={e => set("cod_proveedor", e.target.value)} placeholder="Ej: TUC-48291, 6XKPQR..." /></div>
               </div>
             </div>
             <div style={S.sec}>
@@ -936,19 +938,23 @@ function Reservas({ proveedores, clientes, cuentasBancarias, user, onSave }) {
       </div>
       {loading ? <Spinner /> : (
         <Tabla
-          cols={["Código", "Pasajero", "Destino", "Fechas", "Venta", "Vto pago", "Estado", ""]}
+          cols={["Código", "Pasajero", "Destino", "Fechas", "Venta", "Vto pago", "Vendedor", "Estado", ""]}
           rows={lista.map(r => {
             const dPago = diasHasta(r.vto_pago);
             const pagoUrg = dPago !== null && dPago <= 3 && !["Pagada", "Cerrada", "Cancelada"].includes(r.estado);
             const dViaje = diasHasta(r.fecha_in);
             return (
               <tr key={r.id} style={{ background: "#0d1829" }}>
-                <td style={{ ...S.td, fontFamily: "monospace", color: "#c9a84c", fontSize: 11 }}>{r.codigo}</td>
+                <td style={{ ...S.td, fontFamily: "monospace", color: "#c9a84c", fontSize: 11 }}>
+                  <div>{r.codigo}</div>
+                  {r.cod_proveedor && <div style={{ fontSize: 9, color: "#4a6fa5", marginTop: 2 }}>🏷 {r.cod_proveedor}</div>}
+                </td>
                 <td style={S.td}><div style={{ fontWeight: 500 }}>{r.pasajero_nombre}</div><div style={{ fontSize: 10, color: "#4a6fa5" }}>{r.tipo} · {paxStr(r)}</div></td>
                 <td style={S.td}><div>{r.destino}{dViaje !== null && dViaje >= 0 && dViaje <= 7 && <span style={{ marginLeft: 5, fontSize: 9, background: dViaje <= 2 ? "#2d0f0f" : "#2d2010", color: dViaje <= 2 ? "#ef4444" : "#f59e0b", padding: "1px 5px", borderRadius: 8, fontWeight: 700 }}>{dViaje === 0 ? "HOY" : dViaje + "d"}</span>}</div><div style={{ fontSize: 10, color: "#4a6fa5" }}>{r.proveedor_nombre}</div></td>
                 <td style={{ ...S.td, fontSize: 11, color: "#7a9cc8" }}>{fmtD(r.fecha_in)}{r.fecha_out ? " → " + fmtD(r.fecha_out) : ""}</td>
                 <td style={{ ...S.td, fontWeight: 600 }}>{fmt(r.venta, r.moneda)}</td>
                 <td style={S.td}><span style={{ fontSize: 11, color: pagoUrg ? "#ef4444" : "#7a9cc8", fontWeight: pagoUrg ? 700 : 400 }}>{pagoUrg ? "⚠️ " : ""}{fmtD(r.vto_pago)}</span></td>
+                <td style={{ ...S.td, fontSize: 11, color: "#7a9cc8" }}>{r.vendedor || "—"}</td>
                 <td style={S.td}><Badge estado={r.estado} /></td>
                 <td style={S.td}>
                   <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
