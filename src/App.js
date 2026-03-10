@@ -16,9 +16,7 @@ const noches = (a, b) => { if (!a || !b) return 0; return Math.round((new Date(b
 const paxStr = (r) => { const p = []; if (r.adultos) p.push(r.adultos + "A"); if (r.chd) p.push(r.chd + "CHD"); if (r.inf) p.push(r.inf + "INF"); return p.join(" · "); };
 
 function Badge({ estado }) {
-  return React.createElement("span", {
-    style: { display: "inline-flex", padding: "2px 9px", borderRadius: 20, fontSize: 10, fontWeight: 700, background: ESTADO_BG[estado] || "#1e2a3a", color: ESTADO_C[estado] || "#94a3b8", border: "1px solid " + (ESTADO_C[estado] || "#1e3a5f") + "44" }
-  }, estado);
+  return <span style={{ display: "inline-flex", padding: "2px 9px", borderRadius: 20, fontSize: 10, fontWeight: 700, background: ESTADO_BG[estado] || "#1e2a3a", color: ESTADO_C[estado] || "#94a3b8", border: "1px solid " + (ESTADO_C[estado] || "#1e3a5f") + "44" }}>{estado}</span>;
 }
 
 const S = {
