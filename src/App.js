@@ -348,12 +348,21 @@ function ModalReserva({ reserva, proveedores, clientes, cuentasBancarias, user, 
   const [err, setErr] = useState({});
   const [busqCliente, setBusqCliente] = useState(reserva ? reserva.pasajero_nombre || "" : "");
   const [mostrarBusq, setMostrarBusq] = useState(false);
+  const [vendedores, setVendedores] = useState([]);
   const set = (k, v) => setF(x => ({ ...x, [k]: v }));
   const provSel = proveedores.find(p => String(p.id) === String(f.proveedor_id));
   const cuentasSel = provSel?.cuentas_proveedor || [];
   const ganancia = f.venta && f.neto ? (parseFloat(f.venta) - parseFloat(f.neto)) : 0;
   const nn = noches(f.fecha_in, f.fecha_out);
   const clientesFiltrados = clientes.filter(c => { const s = busqCliente.toLowerCase(); return s.length >= 2 && ((c.nombre + " " + c.apellido).toLowerCase().includes(s) || (c.dni || "").includes(s)); }).slice(0, 6);
+
+  useEffect(() => {
+    setVendedores([
+      { id: 1, nombre: "Guido Finkelstein" },
+      { id: 2, nombre: "Ruthy Tuchsznajder" },
+      { id: 3, nombre: "Julieta Zubeldia" },
+    ]);
+  }, []);
 
   function selCliente(c) { setF(x => ({ ...x, cliente_id: c.id, pasajero_nombre: c.nombre + " " + c.apellido, pasajero_mail: c.mail || "", pasajero_tel: c.tel || "" })); setBusqCliente(c.nombre + " " + c.apellido); setMostrarBusq(false); }
 
@@ -496,7 +505,14 @@ function ModalReserva({ reserva, proveedores, clientes, cuentasBancarias, user, 
                 <div style={S.fg}><label style={S.fl}>Nombre completo *</label><input style={{ ...S.inp, borderColor: err.pasajero_nombre ? "#ef4444" : "#1e3a5f" }} value={f.pasajero_nombre} onChange={e => set("pasajero_nombre", e.target.value)} />{err.pasajero_nombre && <div style={S.err}>{err.pasajero_nombre}</div>}</div>
                 <div style={S.fg}><label style={S.fl}>Email</label><input style={S.inp} value={f.pasajero_mail} onChange={e => set("pasajero_mail", e.target.value)} /></div>
                 <div style={S.fg}><label style={S.fl}>Teléfono</label><input style={S.inp} value={f.pasajero_tel} onChange={e => set("pasajero_tel", e.target.value)} /></div>
-                <div style={S.fg}><label style={S.fl}>Vendedor</label><input style={S.inp} value={f.vendedor} onChange={e => set("vendedor", e.target.value)} /></div>
+                <div style={S.fg}>
+                  <label style={S.fl}>Vendedor</label>
+                  <select style={S.sel} value={f.vendedor} onChange={e => set("vendedor", e.target.value)}>
+                    <option value="">Seleccionar...</option>
+                    {vendedores.map(v => <option key={v.id} value={v.nombre}>{v.nombre}</option>)}
+                    {f.vendedor && !vendedores.find(v => v.nombre === f.vendedor) && <option value={f.vendedor}>{f.vendedor}</option>}
+                  </select>
+                </div>
               </div>
             </div>
 
