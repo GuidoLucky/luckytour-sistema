@@ -239,9 +239,9 @@ function Sidebar({ page, setPage, alertasCount, user, onLogout, collapsed, setCo
 }
 
 // ══ MODAL RESERVA ══
-const FORM_EMPTY = { codigo: "", estado: "Borrador", tipo: "Aéreo", destino: "", pasajero_nombre: "", pasajero_mail: "", pasajero_tel: "", cliente_id: null, fecha_in: "", fecha_out: "", vto_pago: "", vto_cobro: "", vto_reserva: "", proveedor_id: "", proveedor_nombre: "", cuenta_proveedor_id: "", habitacion: "", adultos: 1, chd: 0, inf: 0, moneda: "USD", neto: "", venta: "", seguro_compania: "", seguro_poliza: "", seguro_desde: "", seguro_hasta: "", vendedor: "", notas: "" };
+const FORM_EMPTY = { codigo: "", estado: "Borrador", tipo: "Aéreo", destino: "", pasajero_nombre: "", pasajero_mail: "", pasajero_tel: "", cliente_id: null, fecha_in: "", fecha_out: "", vto_pago: "", vto_cobro: "", vto_reserva: "", proveedor_id: "", proveedor_nombre: "", proveedor_nombre_libre: "", cuenta_proveedor_id: "", habitacion: "", adultos: 1, chd: 0, inf: 0, moneda: "USD", neto: "", venta: "", seguro_compania: "", seguro_poliza: "", seguro_desde: "", seguro_hasta: "", vendedor: "", notas: "", ya_abonado: false, ya_abonado_cuenta_id: "" };
 
-function ModalReserva({ reserva, proveedores, clientes, user, onSave, onClose }) {
+function ModalReserva({ reserva, proveedores, clientes, cuentasBancarias, user, onSave, onClose }) {
   const esNueva = !reserva;
   const [f, setF] = useState(reserva ? { ...FORM_EMPTY, ...reserva, proveedor_id: String(reserva.proveedor_id || ""), neto: reserva.neto || "", venta: reserva.venta || "" } : { ...FORM_EMPTY, vendedor: user?.nombre || "" });
   const [tab, setTab] = useState(0);
@@ -264,6 +264,7 @@ function ModalReserva({ reserva, proveedores, clientes, user, onSave, onClose })
     if (!f.pasajero_nombre) e.pasajero_nombre = "Requerido";
     if (!f.fecha_in) e.fecha_in = "Requerido";
     if (!f.proveedor_id) e.proveedor_id = "Requerido";
+    if (f.proveedor_id === "otro" && !f.proveedor_nombre_libre) e.proveedor_id = "Escribí el nombre del proveedor";
     if (!f.venta) e.venta = "Requerido";
     setErr(e);
     return Object.keys(e).length === 0;
@@ -280,15 +281,17 @@ function ModalReserva({ reserva, proveedores, clientes, user, onSave, onClose })
     const neto = f.neto ? parseFloat(f.neto) : null;
     const netoAnterior = reserva?.neto ? parseFloat(reserva.neto) : null;
     const netoChanged = neto !== netoAnterior;
+    const esOtroProveedor = f.proveedor_id === "otro";
     const payload = {
       codigo, estado: f.estado, tipo: f.tipo, destino: f.destino,
       cliente_id: f.cliente_id || null, pasajero_nombre: f.pasajero_nombre,
       pasajero_mail: f.pasajero_mail, pasajero_tel: f.pasajero_tel,
       fecha_in: f.fecha_in || null, fecha_out: f.fecha_out || null,
       vto_pago: f.vto_pago || null, vto_cobro: f.vto_cobro || null, vto_reserva: f.vto_reserva || null,
-      proveedor_id: f.proveedor_id ? parseInt(f.proveedor_id) : null,
-      proveedor_nombre: provSel?.nombre || f.proveedor_nombre || "",
-      cuenta_proveedor_id: f.cuenta_proveedor_id || null,
+      proveedor_id: esOtroProveedor ? null : (f.proveedor_id ? parseInt(f.proveedor_id) : null),
+      proveedor_nombre: esOtroProveedor ? f.proveedor_nombre_libre : (provSel?.nombre || f.proveedor_nombre || ""),
+      proveedor_nombre_libre: esOtroProveedor ? f.proveedor_nombre_libre : null,
+      cuenta_proveedor_id: esOtroProveedor ? null : (f.cuenta_proveedor_id || null),
       habitacion: f.habitacion, adultos: parseInt(f.adultos) || 1,
       chd: parseInt(f.chd) || 0, inf: parseInt(f.inf) || 0,
       moneda: f.moneda, neto, venta: f.venta ? parseFloat(f.venta) : null,
@@ -300,30 +303,50 @@ function ModalReserva({ reserva, proveedores, clientes, user, onSave, onClose })
 
     let error, data;
     if (esNueva) {
-      // saldo_pendiente = neto al crear
-      payload.saldo_pendiente = neto || 0;
+      // Si ya abonado → saldo_pendiente = 0, sino = neto
+      payload.saldo_pendiente = f.ya_abonado ? 0 : (neto || 0);
       ({ error, data } = await supabase.from("reservas").insert([payload]).select().single());
-      // Registrar deuda automática en movimientos
-      if (!error && neto && f.proveedor_id) {
-        await supabase.from("movimientos").insert([{
-          tipo: "deuda_proveedor",
-          fecha: hoy(),
-          monto_origen: neto,
-          moneda_origen: f.moneda,
-          proveedor_id: parseInt(f.proveedor_id),
-          cuenta_proveedor_id: f.cuenta_proveedor_id || null,
-          concepto: "Deuda generada — " + codigo + " · " + f.pasajero_nombre,
-          reserva_cod: codigo,
-          usuario_id: user?.id || null,
-        }]);
-        // Actualizar saldo del proveedor (restar neto)
-        if (f.cuenta_proveedor_id) {
-          const { data: cp } = await supabase.from("cuentas_proveedor").select("saldo").eq("id", f.cuenta_proveedor_id).single();
-          if (cp) await supabase.from("cuentas_proveedor").update({ saldo: (cp.saldo || 0) - neto }).eq("id", f.cuenta_proveedor_id);
+
+      if (!error && neto) {
+        if (f.ya_abonado) {
+          // Registrar como pago ya realizado
+          await supabase.from("movimientos").insert([{
+            tipo: "pago_proveedor",
+            fecha: hoy(),
+            monto_origen: neto,
+            moneda_origen: f.moneda,
+            proveedor_id: esOtroProveedor ? null : (f.proveedor_id ? parseInt(f.proveedor_id) : null),
+            cuenta_proveedor_id: f.cuenta_proveedor_id || null,
+            desde_cuenta_id: f.ya_abonado_cuenta_id || null,
+            concepto: "Pago directo — " + codigo + " · " + f.pasajero_nombre + " · " + (esOtroProveedor ? f.proveedor_nombre_libre : (provSel?.nombre || "")),
+            reserva_cod: codigo,
+            usuario_id: user?.id || null,
+          }]);
+          // Descontar de la cuenta bancaria si se especificó
+          if (f.ya_abonado_cuenta_id) {
+            const { data: cb } = await supabase.from("cuentas_bancarias").select("saldo").eq("id", f.ya_abonado_cuenta_id).single();
+            if (cb) await supabase.from("cuentas_bancarias").update({ saldo: (cb.saldo || 0) - neto }).eq("id", f.ya_abonado_cuenta_id);
+          }
+        } else if (!esOtroProveedor && f.proveedor_id) {
+          // Deuda normal con proveedor del sistema
+          await supabase.from("movimientos").insert([{
+            tipo: "deuda_proveedor",
+            fecha: hoy(),
+            monto_origen: neto,
+            moneda_origen: f.moneda,
+            proveedor_id: parseInt(f.proveedor_id),
+            cuenta_proveedor_id: f.cuenta_proveedor_id || null,
+            concepto: "Deuda generada — " + codigo + " · " + f.pasajero_nombre,
+            reserva_cod: codigo,
+            usuario_id: user?.id || null,
+          }]);
+          if (f.cuenta_proveedor_id) {
+            const { data: cp } = await supabase.from("cuentas_proveedor").select("saldo").eq("id", f.cuenta_proveedor_id).single();
+            if (cp) await supabase.from("cuentas_proveedor").update({ saldo: (cp.saldo || 0) - neto }).eq("id", f.cuenta_proveedor_id);
+          }
         }
       }
     } else {
-      // Si cambió el neto, ajustar saldo_pendiente
       if (netoChanged && neto !== null) {
         const pagado = (netoAnterior || 0) - (reserva.saldo_pendiente || 0);
         payload.saldo_pendiente = Math.max(0, neto - pagado);
@@ -380,8 +403,19 @@ function ModalReserva({ reserva, proveedores, clientes, user, onSave, onClose })
             <div style={S.sec}>
               <div style={S.stitle}>Proveedor</div>
               <div style={S.g2}>
-                <div style={S.fg}><label style={S.fl}>Proveedor *</label><select style={{ ...S.sel, borderColor: err.proveedor_id ? "#ef4444" : "#1e3a5f" }} value={f.proveedor_id} onChange={e => { set("proveedor_id", e.target.value); set("cuenta_proveedor_id", ""); }}><option value="">Seleccionar...</option>{proveedores.map(p => <option key={p.id} value={p.id}>{p.nombre}</option>)}</select>{err.proveedor_id && <div style={S.err}>{err.proveedor_id}</div>}</div>
-                <div style={S.fg}><label style={S.fl}>Cuenta</label><select style={S.sel} value={f.cuenta_proveedor_id} onChange={e => set("cuenta_proveedor_id", e.target.value)} disabled={!cuentasSel.length}><option value="">Seleccionar...</option>{cuentasSel.map(c => <option key={c.id} value={c.id}>{c.nombre} ({c.moneda})</option>)}</select></div>
+                <div style={S.fg}>
+                  <label style={S.fl}>Proveedor *</label>
+                  <select style={{ ...S.sel, borderColor: err.proveedor_id ? "#ef4444" : "#1e3a5f" }} value={f.proveedor_id} onChange={e => { set("proveedor_id", e.target.value); set("cuenta_proveedor_id", ""); if (e.target.value !== "otro") set("proveedor_nombre_libre", ""); }}>
+                    <option value="">Seleccionar...</option>
+                    {proveedores.map(p => <option key={p.id} value={p.id}>{p.nombre}</option>)}
+                    <option value="otro">— Otro proveedor —</option>
+                  </select>
+                  {err.proveedor_id && <div style={S.err}>{err.proveedor_id}</div>}
+                </div>
+                {f.proveedor_id !== "otro"
+                  ? <div style={S.fg}><label style={S.fl}>Cuenta</label><select style={S.sel} value={f.cuenta_proveedor_id} onChange={e => set("cuenta_proveedor_id", e.target.value)} disabled={!cuentasSel.length}><option value="">Seleccionar...</option>{cuentasSel.map(c => <option key={c.id} value={c.id}>{c.nombre} ({c.moneda})</option>)}</select></div>
+                  : <div style={S.fg}><label style={S.fl}>Nombre del proveedor *</label><input style={S.inp} value={f.proveedor_nombre_libre || ""} onChange={e => set("proveedor_nombre_libre", e.target.value)} placeholder="Ej: American Airlines web, Booking.com..." /></div>
+                }
               </div>
             </div>
             <div style={S.sec}>
@@ -413,7 +447,23 @@ function ModalReserva({ reserva, proveedores, clientes, user, onSave, onClose })
               <div style={S.fg}><label style={S.fl}>Neto (costo al proveedor)</label><input style={S.inp} type="number" value={f.neto} onChange={e => set("neto", e.target.value)} placeholder="0.00" /></div>
               <div style={S.fg}><label style={S.fl}>Venta (precio al cliente) *</label><input style={{ ...S.inp, borderColor: err.venta ? "#ef4444" : "#1e3a5f" }} type="number" value={f.venta} onChange={e => set("venta", e.target.value)} placeholder="0.00" />{err.venta && <div style={S.err}>{err.venta}</div>}</div>
             </div>
-            {ganancia > 0 && <div style={{ padding: "10px 14px", background: "#0a2d1e", borderRadius: 8 }}><span style={{ fontSize: 12, color: "#10b981", fontWeight: 700 }}>💚 Ganancia: {fmt(ganancia, f.moneda)}</span></div>}
+            {ganancia > 0 && <div style={{ padding: "10px 14px", background: "#0a2d1e", borderRadius: 8, marginBottom: 14 }}><span style={{ fontSize: 12, color: "#10b981", fontWeight: 700 }}>💚 Ganancia: {fmt(ganancia, f.moneda)}</span></div>}
+            <div style={{ padding: "14px", background: f.ya_abonado ? "#0a2d1e" : "#080f1a", borderRadius: 8, border: "1px solid " + (f.ya_abonado ? "#10b98155" : "#1e3a5f") }}>
+              <label style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer", fontSize: 13, fontWeight: 600 }}>
+                <input type="checkbox" checked={!!f.ya_abonado} onChange={e => set("ya_abonado", e.target.checked)} style={{ width: 16, height: 16, cursor: "pointer" }} />
+                ✅ Ya abonado al proveedor
+              </label>
+              <div style={{ fontSize: 11, color: "#4a6fa5", marginTop: 4, marginLeft: 26 }}>El pago ya fue realizado — no genera deuda pendiente</div>
+              {f.ya_abonado && (
+                <div style={{ marginTop: 12 }}>
+                  <label style={S.fl}>¿Con qué cuenta/tarjeta se pagó?</label>
+                  <select style={S.sel} value={f.ya_abonado_cuenta_id || ""} onChange={e => set("ya_abonado_cuenta_id", e.target.value)}>
+                    <option value="">Seleccionar cuenta...</option>
+                    {(cuentasBancarias || []).map(c => <option key={c.id} value={c.id}>{c.nombre} ({c.moneda})</option>)}
+                  </select>
+                </div>
+              )}
+            </div>
           </div>
         )}
 
@@ -659,7 +709,7 @@ function ModalCancelacion({ reserva, onConfirmar, onClose }) {
 }
 
 // ══ RESERVAS ══
-function Reservas({ proveedores, clientes, user }) {
+function Reservas({ proveedores, clientes, cuentasBancarias, user }) {
   const [reservas, setReservas] = useState([]);
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState("");
@@ -757,7 +807,7 @@ function Reservas({ proveedores, clientes, user }) {
           })}
         />
       )}
-      {modal && <ModalReserva reserva={modal === "nueva" ? null : modal} proveedores={proveedores} clientes={clientes} user={user} onSave={() => { setModal(null); cargar(); }} onClose={() => setModal(null)} />}
+      {modal && <ModalReserva reserva={modal === "nueva" ? null : modal} proveedores={proveedores} clientes={clientes} cuentasBancarias={cuentasBancarias} user={user} onSave={() => { setModal(null); cargar(); }} onClose={() => setModal(null)} />}
       {confirmCancel && <ModalCancelacion reserva={confirmCancel.r} onConfirmar={(datos) => ejecutarCambioEstado(confirmCancel.r, "Cancelada", datos)} onClose={() => setConfirmCancel(null)} />}
     </div>
   );
@@ -1691,7 +1741,7 @@ export default function App() {
         <div style={{ flex: 1, padding: 24, overflowY: "auto" }}>
           {page === "dashboard" && <Dashboard reservas={reservasDash} movimientos={movimientosDash} alertas={alertasAll} setPage={setPage} />}
           {page === "expedientes" && <Expedientes clientes={clientes} user={user} />}
-          {page === "reservas" && <Reservas proveedores={proveedores} clientes={clientes} user={user} />}
+          {page === "reservas" && <Reservas proveedores={proveedores} clientes={clientes} cuentasBancarias={cuentasBancarias} user={user} />}
           {page === "clientes" && <Clientes />}
           {page === "proveedores" && <Proveedores proveedores={proveedores} />}
           {page === "finanzas" && <Finanzas cuentasBancarias={cuentasBancarias} proveedores={proveedores} user={user} />}
