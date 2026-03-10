@@ -478,6 +478,119 @@ function Dashboard({ reservas, movimientos, alertas, setPage }) {
   );
 }
 
+// ══ MODAL CANCELACION ══
+function ModalCancelacion({ reserva, onConfirmar, onClose }) {
+  const [penProv, setPenProv] = useState("");
+  const [penCli, setPenCli] = useState("");
+  const [notas, setNotas] = useState("");
+  const [cobradoCli, setCobradoCli] = useState(null);
+  const [loadingCobros, setLoadingCobros] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    // Buscar cobros al cliente para esta reserva
+    supabase.from("movimientos")
+      .select("monto_origen,moneda_origen,tc")
+      .eq("reserva_cod", reserva.codigo)
+      .eq("tipo", "cobro_cliente")
+      .then(({ data }) => {
+        const total = (data || []).reduce((s, m) => {
+          // Convertir a moneda de la reserva si es necesario
+          if (m.moneda_origen === reserva.moneda) return s + (m.monto_origen || 0);
+          if (m.moneda_origen === "ARS" && reserva.moneda === "USD") return s + (m.monto_origen || 0) / (m.tc || 1);
+          if (m.moneda_origen === "USD" && reserva.moneda === "ARS") return s + (m.monto_origen || 0) * (m.tc || 1);
+          return s + (m.monto_origen || 0);
+        }, 0);
+        setCobradoCli(total);
+        setLoadingCobros(false);
+      });
+  }, [reserva]);
+
+  const penProvN = parseFloat(penProv) || 0;
+  const penCliN = parseFloat(penCli) || 0;
+  const cobrado = cobradoCli || 0;
+  const diferencia = cobrado - penCliN; // + = reembolsar, - = cobrar
+
+  async function confirmar() {
+    setSaving(true);
+    await onConfirmar({
+      penalidad_proveedor: penProvN,
+      penalidad_cliente: penCliN,
+      cobrado_cliente: cobrado,
+      notas,
+    });
+    setSaving(false);
+  }
+
+  return (
+    <div style={S.modal} onClick={onClose}>
+      <div style={mbox(500)} onClick={e => e.stopPropagation()}>
+        <div style={{ fontSize: 17, fontWeight: 700, marginBottom: 4 }}>❌ Cancelar reserva</div>
+        <div style={{ fontSize: 12, color: "#7a9cc8", marginBottom: 20 }}>
+          <span style={{ fontFamily: "monospace", color: "#c9a84c" }}>{reserva.codigo}</span> — {reserva.pasajero_nombre} · {reserva.destino}
+        </div>
+
+        {/* Info de la reserva */}
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginBottom: 20 }}>
+          <div style={{ padding: "10px 12px", background: "#080f1a", borderRadius: 8 }}>
+            <div style={{ fontSize: 10, color: "#4a6fa5", marginBottom: 3 }}>Neto (proveedor)</div>
+            <div style={{ fontSize: 14, fontWeight: 700, color: "#ef4444" }}>{fmt(reserva.neto, reserva.moneda)}</div>
+          </div>
+          <div style={{ padding: "10px 12px", background: "#080f1a", borderRadius: 8 }}>
+            <div style={{ fontSize: 10, color: "#4a6fa5", marginBottom: 3 }}>Venta (cliente)</div>
+            <div style={{ fontSize: 14, fontWeight: 700, color: "#c9a84c" }}>{fmt(reserva.venta, reserva.moneda)}</div>
+          </div>
+          <div style={{ padding: "10px 12px", background: "#080f1a", borderRadius: 8 }}>
+            <div style={{ fontSize: 10, color: "#4a6fa5", marginBottom: 3 }}>Cobrado al cliente</div>
+            <div style={{ fontSize: 14, fontWeight: 700, color: "#10b981" }}>{loadingCobros ? "..." : fmt(cobrado, reserva.moneda)}</div>
+          </div>
+        </div>
+
+        <div style={S.g2}>
+          <div style={S.fg}>
+            <label style={S.fl}>Penalidad del proveedor ({reserva.moneda})</label>
+            <input style={S.inp} type="number" value={penProv} onChange={e => setPenProv(e.target.value)} placeholder="0" />
+            <div style={{ fontSize: 10, color: "#4a6fa5", marginTop: 3 }}>Lo que te cobra {reserva.proveedor_nombre}</div>
+          </div>
+          <div style={S.fg}>
+            <label style={S.fl}>Penalidad al cliente ({reserva.moneda})</label>
+            <input style={S.inp} type="number" value={penCli} onChange={e => setPenCli(e.target.value)} placeholder="0" />
+            <div style={{ fontSize: 10, color: "#4a6fa5", marginTop: 3 }}>Lo que le cobrás vos al cliente</div>
+          </div>
+        </div>
+
+        {/* Resultado */}
+        {!loadingCobros && (
+          <div style={{ padding: "12px 14px", background: diferencia > 0 ? "#0a2040" : diferencia < 0 ? "#2d0f0f" : "#0a2d1e", border: "1px solid " + (diferencia > 0 ? "#3b82f644" : diferencia < 0 ? "#ef444444" : "#10b98144"), borderRadius: 8, marginBottom: 16 }}>
+            {diferencia > 0 && <div style={{ fontSize: 13, fontWeight: 700, color: "#3b82f6" }}>💸 A reembolsar al cliente: {fmt(diferencia, reserva.moneda)}</div>}
+            {diferencia < 0 && <div style={{ fontSize: 13, fontWeight: 700, color: "#ef4444" }}>💰 A cobrar al cliente: {fmt(Math.abs(diferencia), reserva.moneda)}</div>}
+            {diferencia === 0 && <div style={{ fontSize: 13, fontWeight: 700, color: "#10b981" }}>✅ Sin diferencias — queda saldado</div>}
+            <div style={{ fontSize: 10, color: "#4a6fa5", marginTop: 4 }}>
+              Cobrado {fmt(cobrado, reserva.moneda)} − Penalidad cliente {fmt(penCliN, reserva.moneda)}
+            </div>
+          </div>
+        )}
+
+        <div style={S.fg}>
+          <label style={S.fl}>Notas de cancelación</label>
+          <textarea style={{ ...S.inp, minHeight: 70, resize: "vertical" }} value={notas} onChange={e => setNotas(e.target.value)} placeholder="Motivo, acuerdos, observaciones..." />
+        </div>
+
+        <div style={{ fontSize: 11, color: "#f59e0b", marginBottom: 16 }}>
+          ⚠️ La reserva queda guardada como Cancelada. La deuda pendiente con el proveedor se revierte automáticamente.
+        </div>
+
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+          <button style={btnS("ghost")} onClick={onClose}>Volver</button>
+          <button style={{ ...btnS("danger"), opacity: saving ? 0.7 : 1 }} onClick={confirmar} disabled={saving}>
+            {saving ? "Procesando..." : "❌ Confirmar cancelación"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ══ RESERVAS ══
 function Reservas({ proveedores, clientes, user }) {
   const [reservas, setReservas] = useState([]);
@@ -488,7 +601,58 @@ function Reservas({ proveedores, clientes, user }) {
   const cargar = useCallback(async () => { setLoading(true); const { data } = await supabase.from("reservas").select("*").order("created_at", { ascending: false }); setReservas(data || []); setLoading(false); }, []);
   useEffect(() => { cargar(); }, [cargar]);
   const lista = reservas.filter(r => { const s = q.toLowerCase(); return (!q || (r.pasajero_nombre || "").toLowerCase().includes(s) || (r.codigo || "").toLowerCase().includes(s) || (r.destino || "").toLowerCase().includes(s) || (r.proveedor_nombre || "").toLowerCase().includes(s)) && (!filtroEstado || r.estado === filtroEstado); });
-  async function cambiarEstado(r, nuevoEstado) { await supabase.from("reservas").update({ estado: nuevoEstado }).eq("id", r.id); cargar(); }
+  const [confirmCancel, setConfirmCancel] = useState(null); // reserva a cancelar
+
+  async function cambiarEstado(r, nuevoEstado) {
+    if (nuevoEstado === "Cancelada" && r.estado !== "Cancelada" && (r.saldo_pendiente || 0) > 0) {
+      setConfirmCancel({ r, nuevoEstado });
+      return;
+    }
+    await ejecutarCambioEstado(r, nuevoEstado, false);
+  }
+
+  async function ejecutarCambioEstado(r, nuevoEstado, datosCancelacion) {
+    const upd = { estado: nuevoEstado };
+    if (nuevoEstado === "Cancelada") {
+      upd.saldo_pendiente = 0;
+      if (datosCancelacion) {
+        upd.cancel_penalidad_proveedor = datosCancelacion.penalidad_proveedor || 0;
+        upd.cancel_penalidad_cliente = datosCancelacion.penalidad_cliente || 0;
+        upd.cancel_notas = datosCancelacion.notas || "";
+      }
+    }
+    await supabase.from("reservas").update(upd).eq("id", r.id);
+
+    if (nuevoEstado === "Cancelada" && datosCancelacion) {
+      const { penalidad_proveedor, penalidad_cliente, cobrado_cliente } = datosCancelacion;
+      // Revertir deuda pendiente con proveedor (lo que quedaba sin pagar)
+      if (r.cuenta_proveedor_id && (r.saldo_pendiente || 0) > 0) {
+        const { data: cp } = await supabase.from("cuentas_proveedor").select("saldo").eq("id", r.cuenta_proveedor_id).single();
+        if (cp) {
+          // Revertir saldo pendiente y aplicar penalidad del proveedor
+          const ajuste = (r.saldo_pendiente || 0) - (penalidad_proveedor || 0);
+          await supabase.from("cuentas_proveedor").update({ saldo: (cp.saldo || 0) + ajuste }).eq("id", r.cuenta_proveedor_id);
+        }
+      }
+      // Registrar movimiento de cancelación
+      const diferencia = (cobrado_cliente || 0) - (penalidad_cliente || 0);
+      const conceptoCan = "Cancelación " + r.codigo + " · " + r.pasajero_nombre +
+        (penalidad_proveedor ? " | Penalidad prov: " + fmt(penalidad_proveedor, r.moneda) : "") +
+        (penalidad_cliente ? " | Penalidad cli: " + fmt(penalidad_cliente, r.moneda) : "") +
+        (diferencia > 0 ? " | A REEMBOLSAR: " + fmt(diferencia, r.moneda) : diferencia < 0 ? " | A COBRAR: " + fmt(Math.abs(diferencia), r.moneda) : "");
+      await supabase.from("movimientos").insert([{
+        tipo: "cancelacion", fecha: hoy(),
+        monto_origen: penalidad_proveedor || 0,
+        moneda_origen: r.moneda,
+        proveedor_id: r.proveedor_id || null,
+        cuenta_proveedor_id: r.cuenta_proveedor_id || null,
+        concepto: conceptoCan,
+        reserva_cod: r.codigo,
+      }]);
+    }
+    setConfirmCancel(null);
+    cargar();
+  }
   return (
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
@@ -527,6 +691,7 @@ function Reservas({ proveedores, clientes, user }) {
         />
       )}
       {modal && <ModalReserva reserva={modal === "nueva" ? null : modal} proveedores={proveedores} clientes={clientes} user={user} onSave={() => { setModal(null); cargar(); }} onClose={() => setModal(null)} />}
+      {confirmCancel && <ModalCancelacion reserva={confirmCancel.r} onConfirmar={(datos) => ejecutarCambioEstado(confirmCancel.r, "Cancelada", datos)} onClose={() => setConfirmCancel(null)} />}
     </div>
   );
 }
