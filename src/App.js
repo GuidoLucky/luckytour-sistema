@@ -1510,7 +1510,7 @@ function Expedientes({ clientes, user }) {
           })
       )}
       {modal && <ModalExpediente expediente={modal === "nuevo" ? null : modal} clientes={clientes} user={user} onSave={() => { setModal(null); cargar(); }} onClose={() => setModal(null)} />}
-      {detalle && <DetalleExpediente expediente={detalle} onClose={() => { setDetalle(null); cargar(); }} user={user} />}
+      {detalle && <DetalleExpediente expediente={detalle} onClose={() => { setDetalle(null); cargar(); }} user={user} clientes={clientes} />}
     </div>
   );
 }
@@ -1574,18 +1574,61 @@ function ModalExpediente({ expediente, clientes, user, onSave, onClose }) {
   );
 }
 
-function DetalleExpediente({ expediente, onClose, user }) {
+function DetalleExpediente({ expediente, onClose, user, clientes }) {
   const [reservasExp, setReservasExp] = useState(expediente.reservas || []);
+  const [pasajeros, setPasajeros] = useState([]);
   const [todasReservas, setTodasReservas] = useState([]);
   const [asignando, setAsignando] = useState(false);
+  const [busqReserva, setBusqReserva] = useState("");
   const [loading, setLoading] = useState(false);
+  // Agregar pasajero
+  const [busqPax, setBusqPax] = useState("");
+  const [mostrarBusqPax, setMostrarBusqPax] = useState(false);
+  const paxFiltrados = clientes.filter(c => {
+    const s = busqPax.toLowerCase();
+    return s.length >= 2 && (c.nombre + " " + c.apellido).toLowerCase().includes(s);
+  }).slice(0, 6);
+
+  const cargarPasajeros = useCallback(async () => {
+    const { data } = await supabase.from("expediente_pasajeros")
+      .select("*").eq("expediente_id", expediente.id).order("created_at");
+    setPasajeros(data || []);
+  }, [expediente.id]);
 
   useEffect(() => {
+    cargarPasajeros();
     supabase.from("reservas").select("id,codigo,tipo,estado,destino,fecha_in,proveedor_nombre,moneda,neto,venta,saldo_pendiente,pasajero_nombre,expediente_id")
       .is("expediente_id", null).not("estado", "in", "(Cancelada,Cerrada)")
       .order("created_at", { ascending: false })
       .then(({ data }) => setTodasReservas(data || []));
-  }, []);
+  }, [cargarPasajeros]);
+
+  async function agregarPasajero(c) {
+    // Evitar duplicados
+    if (pasajeros.some(p => p.cliente_id === c.id)) return;
+    await supabase.from("expediente_pasajeros").insert([{
+      expediente_id: expediente.id,
+      cliente_id: c.id,
+      nombre: c.nombre + " " + c.apellido,
+    }]);
+    setBusqPax("");
+    cargarPasajeros();
+  }
+
+  async function agregarPasajeroLibre() {
+    if (!busqPax.trim()) return;
+    await supabase.from("expediente_pasajeros").insert([{
+      expediente_id: expediente.id,
+      nombre: busqPax.trim(),
+    }]);
+    setBusqPax("");
+    cargarPasajeros();
+  }
+
+  async function quitarPasajero(id) {
+    await supabase.from("expediente_pasajeros").delete().eq("id", id);
+    cargarPasajeros();
+  }
 
   async function asignar(r) {
     setLoading(true);
@@ -1606,16 +1649,21 @@ function DetalleExpediente({ expediente, onClose, user }) {
 
   const totalVenta = reservasExp.reduce((s, r) => r.moneda === "USD" ? s + (r.venta || 0) : s, 0);
   const totalNeto = reservasExp.reduce((s, r) => r.moneda === "USD" ? s + (r.neto || 0) : s, 0);
-  const totalPendiente = reservasExp.reduce((s, r) => r.moneda === "USD" ? s + (r.saldo_pendiente || 0) : s, 0);
+  const totalPendientePago = reservasExp.reduce((s, r) => r.moneda === "USD" ? s + (r.saldo_pendiente || 0) : s, 0);
+
+  const reservasFiltradas = todasReservas.filter(r => {
+    const s = busqReserva.toLowerCase();
+    return !s || (r.pasajero_nombre || "").toLowerCase().includes(s) || (r.codigo || "").toLowerCase().includes(s) || (r.destino || "").toLowerCase().includes(s);
+  });
 
   return (
     <div style={S.modal} onClick={onClose}>
-      <div style={{ ...mbox(700), maxHeight: "90vh", overflowY: "auto" }} onClick={e => e.stopPropagation()}>
+      <div style={{ ...mbox(720), maxHeight: "92vh", overflowY: "auto" }} onClick={e => e.stopPropagation()}>
+        {/* Header */}
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
           <div>
             <div style={{ fontFamily: "monospace", fontSize: 11, color: "#c9a84c", marginBottom: 3 }}>{expediente.codigo}</div>
             <div style={{ fontWeight: 700, fontSize: 17 }}>{expediente.nombre}</div>
-            <div style={{ fontSize: 12, color: "#7a9cc8" }}>{expediente.pasajero_nombre}</div>
           </div>
           <button style={btnS("ghost", "sm")} onClick={onClose}>✕</button>
         </div>
@@ -1625,11 +1673,46 @@ function DetalleExpediente({ expediente, onClose, user }) {
           <Stat label="Venta total" value={fmt(totalVenta, "USD")} color="#c9a84c" />
           <Stat label="Neto total" value={fmt(totalNeto, "USD")} color="#ef4444" />
           <Stat label="Margen" value={fmt(totalVenta - totalNeto, "USD")} color="#10b981" />
-          <Stat label="Pendiente pago" value={fmt(totalPendiente, "USD")} color={totalPendiente > 0 ? "#f59e0b" : "#10b981"} />
+          <Stat label="Pendiente pago" value={fmt(totalPendientePago, "USD")} color={totalPendientePago > 0 ? "#f59e0b" : "#10b981"} />
         </div>
 
-        {/* Servicios asignados */}
-        <div style={S.stitle}>Servicios del expediente</div>
+        {/* PASAJEROS */}
+        <div style={{ marginBottom: 20 }}>
+          <div style={S.stitle}>👥 Pasajeros del grupo</div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
+            {pasajeros.map(p => (
+              <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 12px", background: "#0f2040", borderRadius: 20, fontSize: 12 }}>
+                <span>👤 {p.nombre}</span>
+                <button style={{ background: "none", border: "none", color: "#ef4444", cursor: "pointer", fontSize: 14, lineHeight: 1, padding: 0 }} onClick={() => quitarPasajero(p.id)}>×</button>
+              </div>
+            ))}
+            {pasajeros.length === 0 && <span style={{ fontSize: 12, color: "#4a6fa5" }}>Sin pasajeros cargados</span>}
+          </div>
+          {/* Buscador para agregar pasajero */}
+          <div style={{ position: "relative", maxWidth: 340 }}>
+            <div style={{ display: "flex", gap: 6 }}>
+              <input style={{ ...S.inp, flex: 1 }} value={busqPax} onChange={e => { setBusqPax(e.target.value); setMostrarBusqPax(true); }} onFocus={() => setMostrarBusqPax(true)} onBlur={() => setTimeout(() => setMostrarBusqPax(false), 200)} placeholder="Buscar o escribir nombre..." />
+              {busqPax.trim() && paxFiltrados.length === 0 && (
+                <button style={btnS("ghost", "sm")} onMouseDown={agregarPasajeroLibre}>+ Agregar</button>
+              )}
+            </div>
+            {mostrarBusqPax && paxFiltrados.length > 0 && (
+              <div style={{ position: "absolute", top: "100%", left: 0, right: 0, background: "#0d1829", border: "1px solid #1e3a5f", borderRadius: 8, zIndex: 100 }}>
+                {paxFiltrados.map(c => (
+                  <div key={c.id} style={{ padding: "10px 14px", cursor: "pointer", borderBottom: "1px solid #1e3a5f", fontSize: 12 }}
+                    onMouseDown={() => agregarPasajero(c)}>
+                    {c.nombre} {c.apellido}
+                    {pasajeros.some(p => p.cliente_id === c.id) && <span style={{ color: "#10b981", marginLeft: 8, fontSize: 10 }}>✓ ya agregado</span>}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+          <div style={{ fontSize: 10, color: "#4a6fa5", marginTop: 4 }}>Buscá en la base de clientes o escribí un nombre libre y hacé clic en + Agregar</div>
+        </div>
+
+        {/* SERVICIOS */}
+        <div style={S.stitle}>🧳 Servicios del expediente ({reservasExp.length})</div>
         {reservasExp.length === 0 && <div style={{ fontSize: 12, color: "#4a6fa5", marginBottom: 16 }}>Sin servicios asignados todavía</div>}
         {reservasExp.map(r => (
           <div key={r.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", background: "#080f1a", borderRadius: 8, marginBottom: 8 }}>
@@ -1638,7 +1721,7 @@ function DetalleExpediente({ expediente, onClose, user }) {
               <span style={{ marginLeft: 8, fontSize: 11, color: "#4a6fa5" }}>{r.tipo}</span>
               <span style={{ marginLeft: 8 }}><Badge estado={r.estado} /></span>
               <div style={{ fontSize: 12, marginTop: 2 }}>{r.destino} · {fmtD(r.fecha_in)}</div>
-              <div style={{ fontSize: 11, color: "#7a9cc8" }}>{r.proveedor_nombre}</div>
+              <div style={{ fontSize: 11, color: "#7a9cc8" }}>{r.pasajero_nombre} · {r.proveedor_nombre}</div>
             </div>
             <div style={{ textAlign: "right" }}>
               <div style={{ fontSize: 13, fontWeight: 700 }}>{fmt(r.venta, r.moneda)}</div>
@@ -1648,16 +1731,16 @@ function DetalleExpediente({ expediente, onClose, user }) {
           </div>
         ))}
 
-        {/* Asignar reservas */}
-        <div style={{ marginTop: 16 }}>
-          <button style={{ ...btnS(asignando ? "secondary" : "ghost"), marginBottom: 12 }} onClick={() => setAsignando(!asignando)}>
+        {/* Agregar servicio */}
+        <div style={{ marginTop: 12 }}>
+          <button style={{ ...btnS(asignando ? "secondary" : "ghost"), marginBottom: 10 }} onClick={() => setAsignando(!asignando)}>
             {asignando ? "▲ Cerrar" : "+ Agregar servicio"}
           </button>
           {asignando && (
             <div>
-              <div style={{ fontSize: 11, color: "#4a6fa5", marginBottom: 8 }}>Reservas sin expediente asignado:</div>
-              {todasReservas.length === 0 && <div style={{ fontSize: 12, color: "#4a6fa5" }}>No hay reservas disponibles</div>}
-              {todasReservas.map(r => (
+              <input style={{ ...S.inp, marginBottom: 8 }} placeholder="Buscar por pasajero, código o destino..." value={busqReserva} onChange={e => setBusqReserva(e.target.value)} />
+              {reservasFiltradas.length === 0 && <div style={{ fontSize: 12, color: "#4a6fa5" }}>No hay reservas disponibles</div>}
+              {reservasFiltradas.map(r => (
                 <div key={r.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", background: "#080f1a", borderRadius: 8, marginBottom: 6 }}>
                   <div>
                     <span style={{ fontFamily: "monospace", fontSize: 11, color: "#c9a84c" }}>{r.codigo}</span>
