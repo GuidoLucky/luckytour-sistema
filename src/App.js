@@ -1918,8 +1918,10 @@ function Expedientes({ clientes, user, onSave }) {
           ? <div style={{ ...S.card, textAlign: "center", padding: 60, color: "#4a6fa5" }}>Ningún expediente todavía. Creá uno para agrupar servicios de un mismo viaje.</div>
           : expedientes.map(exp => {
             const reservas = exp.reservas || [];
-            const totalVenta = reservas.reduce((s, r) => r.moneda === "USD" ? s + (r.venta || 0) : s, 0);
-            const totalPendiente = reservas.reduce((s, r) => r.moneda === "USD" ? s + (r.saldo_pendiente || 0) : s, 0);
+            const totalVentaUSD = reservas.reduce((s, r) => r.moneda === "USD" ? s + (r.venta || 0) : s, 0);
+            const totalPendienteUSD = reservas.reduce((s, r) => r.moneda === "USD" ? s + (r.saldo_pendiente || 0) : s, 0);
+            const totalVentaARS = reservas.reduce((s, r) => r.moneda === "ARS" ? s + (r.venta || 0) : s, 0);
+            const totalPendienteARS = reservas.reduce((s, r) => r.moneda === "ARS" ? s + (r.saldo_pendiente || 0) : s, 0);
             const estados = [...new Set(reservas.map(r => r.estado))];
             return (
               <div key={exp.id} style={{ ...S.card, marginBottom: 12, cursor: "pointer" }} onClick={() => setDetalle(exp)}>
@@ -1933,8 +1935,11 @@ function Expedientes({ clientes, user, onSave }) {
                     <div style={{ fontSize: 12, color: "#7a9cc8", marginTop: 2 }}>{exp.pasajero_nombre}</div>
                   </div>
                   <div style={{ textAlign: "right" }}>
-                    <div style={{ fontSize: 13, fontWeight: 700, color: "#c9a84c" }}>{fmt(totalVenta, "USD")}</div>
-                    {totalPendiente > 0 && <div style={{ fontSize: 11, color: "#ef4444" }}>{fmt(totalPendiente, "USD")} pendiente</div>}
+                    {totalVentaUSD > 0 && <div style={{ fontSize: 13, fontWeight: 700, color: "#c9a84c" }}>{fmt(totalVentaUSD, "USD")}</div>}
+                    {totalPendienteUSD > 0 && <div style={{ fontSize: 11, color: "#ef4444" }}>{fmt(totalPendienteUSD, "USD")} pendiente</div>}
+                    {totalVentaARS > 0 && <div style={{ fontSize: 13, fontWeight: 700, color: "#c9a84c" }}>{fmt(totalVentaARS, "ARS")}</div>}
+                    {totalPendienteARS > 0 && <div style={{ fontSize: 11, color: "#ef4444" }}>{fmt(totalPendienteARS, "ARS")} pendiente</div>}
+                    {totalVentaUSD === 0 && totalVentaARS === 0 && <div style={{ fontSize: 12, color: "#4a6fa5" }}>Sin servicios</div>}
                   </div>
                 </div>
                 <div style={{ display: "flex", gap: 6, marginTop: 10, flexWrap: "wrap" }}>
