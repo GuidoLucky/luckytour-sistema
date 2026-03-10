@@ -241,7 +241,61 @@ function Sidebar({ page, setPage, alertasCount, user, onLogout, collapsed, setCo
 // ══ MODAL RESERVA ══
 const FORM_EMPTY = { codigo: "", estado: "Borrador", tipo: "Aéreo", destino: "", pasajero_nombre: "", pasajero_mail: "", pasajero_tel: "", cliente_id: null, fecha_in: "", fecha_out: "", vto_pago: "", vto_cobro: "", vto_reserva: "", proveedor_id: "", proveedor_nombre: "", proveedor_nombre_libre: "", cuenta_proveedor_id: "", habitacion: "", adultos: 1, chd: 0, inf: 0, moneda: "USD", neto: "", venta: "", seguro_compania: "", seguro_poliza: "", seguro_desde: "", seguro_hasta: "", vendedor: "", notas: "", ya_abonado: false, ya_abonado_cuenta_id: "", cobrar_a_cliente_id: null, cobrar_a_nombre: "", _cobrarA_tieneCC: false, _cobrarA_saldoCC: 0, _cobrarA_monedaCC: "USD" };
 
-function BuscadorCobrarA({ clientes, cobrarAId, cobrarANombre, onChange }) {
+function CobrarASection({ clientes, f, set }) {
+  const [abierto, setAbierto] = useState(!!f.cobrar_a_cliente_id);
+  return (
+    <div>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <div style={S.stitle}>¿A quién se le cobra? <span style={{ fontSize: 10, fontWeight: 400, color: "#4a6fa5" }}>(si es distinto al pasajero)</span></div>
+        {!f.cobrar_a_cliente_id && (
+          <button style={btnS("ghost", "sm")} onClick={() => setAbierto(v => !v)}>
+            {abierto ? "▲ Cerrar" : "+ Especificar"}
+          </button>
+        )}
+        {f.cobrar_a_cliente_id && (
+          <button style={{ ...btnS("ghost", "sm"), color: "#ef4444" }} onClick={() => { set("cobrar_a_cliente_id", null); set("cobrar_a_nombre", ""); set("_cobrarA_tieneCC", false); set("_cobrarA_saldoCC", 0); set("_cobrarA_monedaCC", "USD"); setAbierto(false); }}>✕ Quitar</button>
+        )}
+      </div>
+
+      {/* Si ya hay uno seleccionado, mostrar resumen aunque esté cerrado */}
+      {f.cobrar_a_cliente_id && !abierto && (
+        <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", background: "#0a2040", borderRadius: 8, fontSize: 12, cursor: "pointer" }} onClick={() => setAbierto(true)}>
+          <span style={{ color: "#3b82f6" }}>💳</span>
+          <span>{f.cobrar_a_nombre}</span>
+          {f._cobrarA_tieneCC && <span style={{ fontSize: 10, color: "#3b82f6" }}>CC: {fmt(f._cobrarA_saldoCC || 0, f._cobrarA_monedaCC || "USD")}</span>}
+        </div>
+      )}
+
+      {abierto && (
+        <div style={{ marginTop: 8 }}>
+          <BuscadorCobrarA
+            clientes={clientes}
+            cobrarAId={f.cobrar_a_cliente_id}
+            cobrarANombre={f.cobrar_a_nombre}
+            onChange={(id, nombre, tieneCC, saldoCC, monedaCC) => {
+              set("cobrar_a_cliente_id", id);
+              set("cobrar_a_nombre", nombre);
+              set("_cobrarA_tieneCC", tieneCC);
+              set("_cobrarA_saldoCC", saldoCC);
+              set("_cobrarA_monedaCC", monedaCC || "USD");
+              if (id) setAbierto(false);
+            }}
+          />
+              {f._cobrarA_tieneCC && (
+                <div style={{ marginTop: 8, padding: "8px 12px", background: "#0a2040", border: "1px solid #3b82f644", borderRadius: 8, fontSize: 11, color: "#3b82f6" }}>
+                  💳 {f.cobrar_a_nombre} tiene CC en <strong>{f._cobrarA_monedaCC || "USD"}</strong> — saldo actual: {fmt(f._cobrarA_saldoCC || 0, f._cobrarA_monedaCC || "USD")}
+                  {f.moneda && f._cobrarA_monedaCC && f.moneda !== f._cobrarA_monedaCC && (
+                    <span style={{ color: "#f59e0b", marginLeft: 6 }}>⚠️ La reserva es en {f.moneda} — se convertirá al guardar usando el TC que ingreses</span>
+                  )}
+                </div>
+              )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+
   const [busq, setBusq] = useState(cobrarANombre || "");
   const [mostrar, setMostrar] = useState(false);
   const filtrados = clientes.filter(c => {
@@ -383,10 +437,19 @@ function ModalReserva({ reserva, proveedores, clientes, cuentasBancarias, user, 
         // Si quien paga tiene CC, sumar la venta a su saldo de CC
         const venta = f.venta ? parseFloat(f.venta) : null;
         if (venta && f._cobrarA_tieneCC && f.cobrar_a_cliente_id) {
-          const { data: cli } = await supabase.from("clientes").select("saldo_cc").eq("id", f.cobrar_a_cliente_id).single();
-          if (cli != null) await supabase.from("clientes").update({ saldo_cc: (cli.saldo_cc || 0) + venta }).eq("id", f.cobrar_a_cliente_id);
+          const monedaCC = f._cobrarA_monedaCC || "USD";
+          const monedaReserva = f.moneda;
+          let montoCC = venta;
+          // Si las monedas no coinciden, convertir usando TC
+          if (monedaCC !== monedaReserva) {
+            const tc = parseFloat(f.tc) || 1;
+            if (monedaReserva === "ARS" && monedaCC === "USD") montoCC = venta / tc;
+            else if (monedaReserva === "USD" && monedaCC === "ARS") montoCC = venta * tc;
+          }
+          const { data: cli } = await supabase.from("clientes").select("saldo_cc, moneda_cc").eq("id", f.cobrar_a_cliente_id).single();
+          if (cli != null) await supabase.from("clientes").update({ saldo_cc: (cli.saldo_cc || 0) + montoCC }).eq("id", f.cobrar_a_cliente_id);
           await supabase.from("movimientos").insert([{
-            tipo: "cobro_cliente", fecha: hoy(), monto_origen: venta, moneda_origen: f.moneda,
+            tipo: "cobro_cliente", fecha: hoy(), monto_origen: montoCC, moneda_origen: monedaCC,
             cliente_nombre: f.cobrar_a_nombre,
             concepto: "CC — " + codigo + " · " + f.pasajero_nombre + " → cargado a CC de " + f.cobrar_a_nombre,
             reserva_cod: codigo, usuario_id: user?.id || null,
@@ -441,13 +504,7 @@ function ModalReserva({ reserva, proveedores, clientes, cuentasBancarias, user, 
 
             {/* COBRAR A */}
             <div style={S.sec}>
-              <div style={S.stitle}>¿A quién se le cobra? <span style={{ fontSize: 10, fontWeight: 400, color: "#4a6fa5" }}>(opcional — si es distinto al pasajero)</span></div>
-              <BuscadorCobrarA clientes={clientes} cobrarAId={f.cobrar_a_cliente_id} cobrarANombre={f.cobrar_a_nombre} onChange={(id, nombre, tieneCC, saldoCC, monedaCC) => { set("cobrar_a_cliente_id", id); set("cobrar_a_nombre", nombre); set("_cobrarA_tieneCC", tieneCC); set("_cobrarA_saldoCC", saldoCC); set("_cobrarA_monedaCC", monedaCC || "USD"); }} />
-              {f._cobrarA_tieneCC && (
-                <div style={{ marginTop: 8, padding: "8px 12px", background: "#0a2040", border: "1px solid #3b82f644", borderRadius: 8, fontSize: 11, color: "#3b82f6" }}>
-                  💳 {f.cobrar_a_nombre} tiene cuenta corriente — el cobro se sumará a su CC (saldo actual: {fmt(f._cobrarA_saldoCC || 0, f._cobrarA_monedaCC || "USD")})
-                </div>
-              )}
+              <CobrarASection clientes={clientes} f={f} set={set} />
             </div>
             <div style={S.sec}>
               <div style={S.stitle}>Servicio</div>
@@ -960,25 +1017,83 @@ function Clientes({ onSave }) {
 }
 
 // ══ PROVEEDORES ══
+function ModalProveedor({ proveedor, onSave, onClose }) {
+  const esNuevo = !proveedor;
+  const [nombre, setNombre] = useState(proveedor?.nombre || "");
+  const [tipo, setTipo] = useState(proveedor?.tipo || "");
+  const [saving, setSaving] = useState(false);
+
+  async function guardar() {
+    if (!nombre.trim()) { alert("Ingresá un nombre"); return; }
+    setSaving(true);
+    if (esNuevo) {
+      const { data: p, error } = await supabase.from("proveedores").insert([{ nombre: nombre.trim(), tipo: tipo.trim() }]).select().single();
+      if (!error && p) {
+        // Crear automáticamente cuenta USD y ARS
+        await supabase.from("cuentas_proveedor").insert([
+          { proveedor_id: p.id, nombre: nombre.trim() + " USD", moneda: "USD", saldo: 0 },
+          { proveedor_id: p.id, nombre: nombre.trim() + " ARS", moneda: "ARS", saldo: 0 },
+        ]);
+      }
+      if (error) { setSaving(false); alert("Error: " + error.message); return; }
+    } else {
+      const { error } = await supabase.from("proveedores").update({ nombre: nombre.trim(), tipo: tipo.trim() }).eq("id", proveedor.id);
+      if (error) { setSaving(false); alert("Error: " + error.message); return; }
+    }
+    setSaving(false);
+    onSave();
+  }
+
+  return (
+    <div style={S.modal} onClick={onClose}>
+      <div style={mbox(420)} onClick={e => e.stopPropagation()}>
+        <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 20 }}>
+          <div style={{ fontWeight: 700, fontSize: 16 }}>{esNuevo ? "Nuevo proveedor" : "Editar proveedor"}</div>
+          <button style={btnS("ghost", "sm")} onClick={onClose}>✕</button>
+        </div>
+        <div style={S.fg}><label style={S.fl}>Nombre *</label><input style={S.inp} value={nombre} onChange={e => setNombre(e.target.value)} placeholder="Ej: Tucano Tours" /></div>
+        <div style={S.fg}><label style={S.fl}>Tipo / Rubro</label><input style={S.inp} value={tipo} onChange={e => setTipo(e.target.value)} placeholder="Ej: Hotel, Aéreo, Seguro..." /></div>
+        {esNuevo && <div style={{ fontSize: 11, color: "#4a6fa5", marginBottom: 14 }}>Se crearán automáticamente las cuentas en USD y ARS.</div>}
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+          <button style={btnS("ghost")} onClick={onClose}>Cancelar</button>
+          <button style={{ ...btnS("pri"), opacity: saving ? 0.7 : 1 }} onClick={guardar} disabled={saving}>{saving ? "Guardando..." : esNuevo ? "✓ Crear" : "✓ Guardar"}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function Proveedores({ proveedores, onSave }) {
+  const [modal, setModal] = useState(null);
+
   return (
     <div>
-      <div style={S.pt}>Proveedores</div>
-      <div style={S.ps}>Saldos de cuentas</div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+        <div style={S.pt}>Proveedores</div>
+        <button style={btnS("pri")} onClick={() => setModal("nuevo")}>+ Nuevo proveedor</button>
+      </div>
+      <div style={{ ...S.ps, marginBottom: 20 }}>Saldos de cuentas</div>
       {proveedores.map(p => (
         <div key={p.id} style={{ ...S.card, marginBottom: 12 }}>
-          <div style={{ fontWeight: 700, marginBottom: 4 }}>{p.nombre}</div>
-          <div style={{ fontSize: 11, color: "#4a6fa5", marginBottom: 10 }}>{p.tipo}</div>
-          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+            <div>
+              <div style={{ fontWeight: 700 }}>{p.nombre}</div>
+              <div style={{ fontSize: 11, color: "#4a6fa5" }}>{p.tipo}</div>
+            </div>
+            <button style={btnS("ghost", "sm")} onClick={() => setModal(p)}>Editar</button>
+          </div>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 10 }}>
             {(p.cuentas_proveedor || []).map(c => (
               <div key={c.id} style={{ padding: "10px 14px", background: "#080f1a", borderRadius: 8, minWidth: 160 }}>
                 <div style={{ fontSize: 10, color: "#4a6fa5", marginBottom: 4 }}>{c.nombre}</div>
                 <div style={{ fontSize: 18, fontWeight: 700, color: (c.saldo || 0) >= 0 ? "#10b981" : "#ef4444" }}>{fmt(c.saldo || 0, c.moneda)}</div>
               </div>
             ))}
+            {(p.cuentas_proveedor || []).length === 0 && <div style={{ fontSize: 11, color: "#4a6fa5" }}>Sin cuentas cargadas</div>}
           </div>
         </div>
       ))}
+      {modal && <ModalProveedor proveedor={modal === "nuevo" ? null : modal} onSave={() => { setModal(null); if (onSave) onSave(); }} onClose={() => setModal(null)} />}
     </div>
   );
 }
@@ -1972,9 +2087,13 @@ function DetalleExpediente({ expediente, onClose, user, clientes }) {
     setLoading(false);
   }
 
-  const totalVenta = reservasExp.reduce((s, r) => r.moneda === "USD" ? s + (r.venta || 0) : s, 0);
-  const totalNeto = reservasExp.reduce((s, r) => r.moneda === "USD" ? s + (r.neto || 0) : s, 0);
-  const totalPendientePago = reservasExp.reduce((s, r) => r.moneda === "USD" ? s + (r.saldo_pendiente || 0) : s, 0);
+  const totalVentaUSD = reservasExp.reduce((s, r) => r.moneda === "USD" ? s + (r.venta || 0) : s, 0);
+  const totalNetoUSD = reservasExp.reduce((s, r) => r.moneda === "USD" ? s + (r.neto || 0) : s, 0);
+  const totalPendientePagoUSD = reservasExp.reduce((s, r) => r.moneda === "USD" ? s + (r.saldo_pendiente || 0) : s, 0);
+  const totalVentaARS = reservasExp.reduce((s, r) => r.moneda === "ARS" ? s + (r.venta || 0) : s, 0);
+  const totalNetoARS = reservasExp.reduce((s, r) => r.moneda === "ARS" ? s + (r.neto || 0) : s, 0);
+  const totalPendientePagoARS = reservasExp.reduce((s, r) => r.moneda === "ARS" ? s + (r.saldo_pendiente || 0) : s, 0);
+  const hayARS = totalVentaARS > 0 || totalNetoARS > 0;
 
   const reservasFiltradas = todasReservas.filter(r => {
     const s = busqReserva.toLowerCase();
@@ -1993,13 +2112,22 @@ function DetalleExpediente({ expediente, onClose, user, clientes }) {
           <button style={btnS("ghost", "sm")} onClick={onClose}>✕</button>
         </div>
 
-        {/* Totales */}
-        <div style={{ display: "flex", gap: 12, marginBottom: 20, flexWrap: "wrap" }}>
-          <Stat label="Venta total" value={fmt(totalVenta, "USD")} color="#c9a84c" />
-          <Stat label="Neto total" value={fmt(totalNeto, "USD")} color="#ef4444" />
-          <Stat label="Margen" value={fmt(totalVenta - totalNeto, "USD")} color="#10b981" />
-          <Stat label="Pendiente pago" value={fmt(totalPendientePago, "USD")} color={totalPendientePago > 0 ? "#f59e0b" : "#10b981"} />
+        {/* Totales USD */}
+        <div style={{ display: "flex", gap: 12, marginBottom: hayARS ? 8 : 20, flexWrap: "wrap" }}>
+          <Stat label="Venta USD" value={fmt(totalVentaUSD, "USD")} color="#c9a84c" />
+          <Stat label="Neto USD" value={fmt(totalNetoUSD, "USD")} color="#ef4444" />
+          <Stat label="Margen USD" value={fmt(totalVentaUSD - totalNetoUSD, "USD")} color="#10b981" />
+          <Stat label="Pendiente pago USD" value={fmt(totalPendientePagoUSD, "USD")} color={totalPendientePagoUSD > 0 ? "#f59e0b" : "#10b981"} />
         </div>
+        {/* Totales ARS (solo si hay) */}
+        {hayARS && (
+          <div style={{ display: "flex", gap: 12, marginBottom: 20, flexWrap: "wrap" }}>
+            <Stat label="Venta ARS" value={fmt(totalVentaARS, "ARS")} color="#c9a84c" />
+            <Stat label="Neto ARS" value={fmt(totalNetoARS, "ARS")} color="#ef4444" />
+            <Stat label="Margen ARS" value={fmt(totalVentaARS - totalNetoARS, "ARS")} color="#10b981" />
+            <Stat label="Pendiente pago ARS" value={fmt(totalPendientePagoARS, "ARS")} color={totalPendientePagoARS > 0 ? "#f59e0b" : "#10b981"} />
+          </div>
+        )}
 
         {/* PASAJEROS */}
         <div style={{ marginBottom: 20 }}>
