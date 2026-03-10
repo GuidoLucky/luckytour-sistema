@@ -2044,16 +2044,26 @@ function Documentos() {
   async function enviar(r, tipo) {
     setSaving(true);
     setMsgEnvio("");
-    const asunto = tipo === "confirmacion" ? "✅ Confirmación de reserva — " + r.destino : "🎫 Voucher de viaje — " + r.destino;
-    const html = tipo === "confirmacion" ? htmlConfirmacion(r) : htmlVoucher(r);
+    const asunto = tipo === "confirmacion"
+      ? "✅ Confirmación de reserva — " + (r.proveedor_nombre || r.destino)
+      : "🎫 Voucher de viaje — " + (r.proveedor_nombre || r.destino);
 
-    // Mandar mail real
+    // Mandar PDF adjunto via endpoint Python
     let mailOk = false;
     if (r.pasajero_mail) {
-      const res = await sendEmail(r.pasajero_mail, asunto, html);
-      mailOk = res.ok;
-      if (!res.ok) setMsgEnvio("⚠️ Error al enviar mail: " + (res.error || "desconocido"));
-      else setMsgEnvio("✅ Mail enviado a " + r.pasajero_mail);
+      try {
+        const resp = await fetch("/api/send-doc", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ tipo, to: r.pasajero_mail, reserva: r }),
+        });
+        const data = await resp.json();
+        mailOk = data.ok === true;
+        if (!mailOk) setMsgEnvio("⚠️ Error al enviar: " + (data.error || "desconocido"));
+        else setMsgEnvio("✅ PDF enviado a " + r.pasajero_mail);
+      } catch(e) {
+        setMsgEnvio("⚠️ Error: " + e.message);
+      }
     } else {
       setMsgEnvio("⚠️ El pasajero no tiene email cargado — se registró sin enviar");
     }
