@@ -239,10 +239,12 @@ function Sidebar({ page, setPage, alertasCount, user, onLogout, collapsed, setCo
 }
 
 // ══ MODAL RESERVA ══
-const FORM_EMPTY = { codigo: "", estado: "Borrador", tipo: "Aéreo", destino: "", pasajero_nombre: "", pasajero_mail: "", pasajero_tel: "", cliente_id: null, fecha_in: "", fecha_out: "", vto_pago: "", vto_cobro: "", vto_reserva: "", proveedor_id: "", proveedor_nombre: "", proveedor_nombre_libre: "", cuenta_proveedor_id: "", habitacion: "", adultos: 1, chd: 0, inf: 0, moneda: "USD", neto: "", venta: "", seguro_compania: "", seguro_poliza: "", seguro_desde: "", seguro_hasta: "", vendedor: "", notas: "", ya_abonado: false, ya_abonado_cuenta_id: "", cobrar_a_cliente_id: null, cobrar_a_nombre: "", _cobrarA_tieneCC: false, _cobrarA_saldoCC: 0, _cobrarA_monedaCC: "USD" };
+const FORM_EMPTY = { codigo: "", estado: "Borrador", tipo: "Aéreo", destino: "", pasajero_nombre: "", pasajero_mail: "", pasajero_tel: "", cliente_id: null, fecha_in: "", fecha_out: "", vto_pago: "", vto_cobro: "", vto_reserva: "", proveedor_id: "", proveedor_nombre: "", proveedor_nombre_libre: "", cuenta_proveedor_id: "", habitacion: "", adultos: 1, chd: 0, inf: 0, moneda: "USD", neto: "", venta: "", seguro_compania: "", seguro_poliza: "", seguro_desde: "", seguro_hasta: "", vendedor: "", notas: "", ya_abonado: false, ya_abonado_cuenta_id: "", cobrar_a_cliente_id: null, cobrar_a_nombre: "", _cobrarA_cli: null };
 
 function CobrarASection({ clientes, f, set }) {
   const [abierto, setAbierto] = useState(!!f.cobrar_a_cliente_id);
+  const cli = f._cobrarA_cli;
+  const tieneCC = cli && (cli.cc_usd || cli.cc_ars || cli.tiene_cuenta_corriente);
   return (
     <div>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
@@ -253,42 +255,38 @@ function CobrarASection({ clientes, f, set }) {
           </button>
         )}
         {f.cobrar_a_cliente_id && (
-          <button style={{ ...btnS("ghost", "sm"), color: "#ef4444" }} onClick={() => { set("cobrar_a_cliente_id", null); set("cobrar_a_nombre", ""); set("_cobrarA_tieneCC", false); set("_cobrarA_saldoCC", 0); set("_cobrarA_monedaCC", "USD"); setAbierto(false); }}>✕ Quitar</button>
+          <button style={{ ...btnS("ghost", "sm"), color: "#ef4444" }} onClick={() => { set("cobrar_a_cliente_id", null); set("cobrar_a_nombre", ""); set("_cobrarA_cli", null); setAbierto(false); }}>✕ Quitar</button>
         )}
       </div>
-
-      {/* Si ya hay uno seleccionado, mostrar resumen aunque esté cerrado */}
       {f.cobrar_a_cliente_id && !abierto && (
         <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", background: "#0a2040", borderRadius: 8, fontSize: 12, cursor: "pointer" }} onClick={() => setAbierto(true)}>
           <span style={{ color: "#3b82f6" }}>💳</span>
           <span>{f.cobrar_a_nombre}</span>
-          {f._cobrarA_tieneCC && <span style={{ fontSize: 10, color: "#3b82f6" }}>CC: {fmt(f._cobrarA_saldoCC || 0, f._cobrarA_monedaCC || "USD")}</span>}
+          {cli?.cc_usd && <span style={{ fontSize: 10, color: "#3b82f6" }}>USD: {fmt(cli.saldo_cc_usd || 0, "USD")}</span>}
+          {cli?.cc_ars && <span style={{ fontSize: 10, color: "#3b82f6" }}>ARS: {fmt(cli.saldo_cc_ars || 0, "ARS")}</span>}
         </div>
       )}
-
       {abierto && (
         <div style={{ marginTop: 8 }}>
           <BuscadorCobrarA
             clientes={clientes}
             cobrarAId={f.cobrar_a_cliente_id}
             cobrarANombre={f.cobrar_a_nombre}
-            onChange={(id, nombre, tieneCC, saldoCC, monedaCC) => {
+            onChange={(id, nombre, tieneCC, cliObj) => {
               set("cobrar_a_cliente_id", id);
               set("cobrar_a_nombre", nombre);
-              set("_cobrarA_tieneCC", tieneCC);
-              set("_cobrarA_saldoCC", saldoCC);
-              set("_cobrarA_monedaCC", monedaCC || "USD");
+              set("_cobrarA_cli", cliObj);
               if (id) setAbierto(false);
             }}
           />
-              {f._cobrarA_tieneCC && (
-                <div style={{ marginTop: 8, padding: "8px 12px", background: "#0a2040", border: "1px solid #3b82f644", borderRadius: 8, fontSize: 11, color: "#3b82f6" }}>
-                  💳 {f.cobrar_a_nombre} tiene CC en <strong>{f._cobrarA_monedaCC || "USD"}</strong> — saldo actual: {fmt(f._cobrarA_saldoCC || 0, f._cobrarA_monedaCC || "USD")}
-                  {f.moneda && f._cobrarA_monedaCC && f.moneda !== f._cobrarA_monedaCC && (
-                    <span style={{ color: "#f59e0b", marginLeft: 6 }}>⚠️ La reserva es en {f.moneda} — se convertirá al guardar usando el TC que ingreses</span>
-                  )}
-                </div>
-              )}
+          {tieneCC && (
+            <div style={{ marginTop: 8, padding: "8px 12px", background: "#0a2040", border: "1px solid #3b82f644", borderRadius: 8, fontSize: 11, color: "#3b82f6" }}>
+              💳 {f.cobrar_a_nombre} tiene CC —
+              {cli?.cc_usd && <span style={{ marginLeft: 6 }}>USD: {fmt(cli.saldo_cc_usd || 0, "USD")}</span>}
+              {cli?.cc_ars && <span style={{ marginLeft: 6 }}>ARS: {fmt(cli.saldo_cc_ars || 0, "ARS")}</span>}
+              <div style={{ marginTop: 4, color: "#7a9cc8" }}>El cobro se sumará a la CC en la moneda de la reserva ({f.moneda || "USD"})</div>
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -305,12 +303,12 @@ function BuscadorCobrarA({ clientes, cobrarAId, cobrarANombre, onChange }) {
 
   function seleccionar(c) {
     setBusq(c.nombre + " " + c.apellido);
-    onChange(c.id, c.nombre + " " + c.apellido, !!c.tiene_cuenta_corriente, c.saldo_cc || 0, c.moneda_cc || "USD");
+    onChange(c.id, c.nombre + " " + c.apellido, c.cc_usd || c.cc_ars || c.tiene_cuenta_corriente, c);
     setMostrar(false);
   }
 
   function limpiar() {
-    setBusq(""); onChange(null, "", false, 0, "USD");
+    setBusq(""); onChange(null, "", false, null);
   }
 
   return (
@@ -329,8 +327,10 @@ function BuscadorCobrarA({ clientes, cobrarAId, cobrarANombre, onChange }) {
             <div key={c.id} style={{ padding: "10px 14px", cursor: "pointer", borderBottom: "1px solid #1e3a5f", fontSize: 12, display: "flex", justifyContent: "space-between" }}
               onMouseDown={() => seleccionar(c)}>
               <span><strong>{c.nombre} {c.apellido}</strong></span>
-              <span style={{ fontSize: 10, color: c.tiene_cuenta_corriente ? "#3b82f6" : "#4a6fa5" }}>
-                {c.tiene_cuenta_corriente ? "💳 CC: " + fmt(c.saldo_cc || 0, c.moneda_cc || "USD") : "Sin CC"}
+              <span style={{ fontSize: 10, color: (c.cc_usd || c.cc_ars || c.tiene_cuenta_corriente) ? "#3b82f6" : "#4a6fa5" }}>
+                {(c.cc_usd || c.cc_ars || c.tiene_cuenta_corriente) ? 
+                  "💳" + (c.cc_usd ? " USD:" + fmt(c.saldo_cc_usd || 0, "USD") : "") + (c.cc_ars ? " ARS:" + fmt(c.saldo_cc_ars || 0, "ARS") : "")
+                  : "Sin CC"}
               </span>
             </div>
           ))}
@@ -434,22 +434,19 @@ function ModalReserva({ reserva, proveedores, clientes, cuentasBancarias, user, 
           }
         }
 
-        // Si quien paga tiene CC, sumar la venta a su saldo de CC
+        // Si quien paga tiene CC, sumar la venta al saldo CC en la moneda de la reserva
         const venta = f.venta ? parseFloat(f.venta) : null;
-        if (venta && f._cobrarA_tieneCC && f.cobrar_a_cliente_id) {
-          const monedaCC = f._cobrarA_monedaCC || "USD";
-          const monedaReserva = f.moneda;
-          let montoCC = venta;
-          // Si las monedas no coinciden, convertir usando TC
-          if (monedaCC !== monedaReserva) {
-            const tc = parseFloat(f.tc) || 1;
-            if (monedaReserva === "ARS" && monedaCC === "USD") montoCC = venta / tc;
-            else if (monedaReserva === "USD" && monedaCC === "ARS") montoCC = venta * tc;
+        const cliCC = f._cobrarA_cli;
+        if (venta && cliCC && f.cobrar_a_cliente_id && (cliCC.cc_usd || cliCC.cc_ars || cliCC.tiene_cuenta_corriente)) {
+          const monedaReserva = f.moneda || "USD";
+          const campoSaldo = monedaReserva === "ARS" ? "saldo_cc_ars" : "saldo_cc_usd";
+          const { data: cliActual } = await supabase.from("clientes").select("saldo_cc_usd, saldo_cc_ars").eq("id", f.cobrar_a_cliente_id).single();
+          if (cliActual) {
+            const saldoActual = cliActual[campoSaldo] || 0;
+            await supabase.from("clientes").update({ [campoSaldo]: saldoActual + venta }).eq("id", f.cobrar_a_cliente_id);
           }
-          const { data: cli } = await supabase.from("clientes").select("saldo_cc, moneda_cc").eq("id", f.cobrar_a_cliente_id).single();
-          if (cli != null) await supabase.from("clientes").update({ saldo_cc: (cli.saldo_cc || 0) + montoCC }).eq("id", f.cobrar_a_cliente_id);
           await supabase.from("movimientos").insert([{
-            tipo: "cobro_cliente", fecha: hoy(), monto_origen: montoCC, moneda_origen: monedaCC,
+            tipo: "cobro_cliente", fecha: hoy(), monto_origen: venta, moneda_origen: monedaReserva,
             cliente_nombre: f.cobrar_a_nombre,
             concepto: "CC — " + codigo + " · " + f.pasajero_nombre + " → cargado a CC de " + f.cobrar_a_nombre,
             reserva_cod: codigo, usuario_id: user?.id || null,
@@ -617,13 +614,14 @@ function ModalReserva({ reserva, proveedores, clientes, cuentasBancarias, user, 
 }
 
 // ══ MODAL CLIENTE ══
-const CLI_EMPTY = { nombre: "", apellido: "", dni: "", pasaporte: "", pasaporte_vto: "", tel: "", mail: "", fecha_nac: "", notas: "", tiene_cuenta_corriente: false, moneda_cc: "USD", cobro_contacto_nombre: "", cobro_contacto_tel: "", cobro_contacto_mail: "" };
+const CLI_EMPTY = { nombre: "", apellido: "", dni: "", pasaporte: "", pasaporte_vto: "", tel: "", mail: "", fecha_nac: "", notas: "", cc_usd: false, cc_ars: false, cobro_contacto_nombre: "", cobro_contacto_tel: "", cobro_contacto_mail: "" };
 function ModalCliente({ cliente, onSave, onClose }) {
   const esNuevo = !cliente;
   const [f, setF] = useState(cliente || CLI_EMPTY);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState({});
   const set = (k, v) => setF(x => ({ ...x, [k]: v }));
+  const tieneCC = f.cc_usd || f.cc_ars;
   async function guardar() {
     const e = {};
     if (!f.nombre) e.nombre = "Requerido";
@@ -635,8 +633,8 @@ function ModalCliente({ cliente, onSave, onClose }) {
       nombre: f.nombre, apellido: f.apellido, dni: f.dni,
       pasaporte: f.pasaporte, pasaporte_vto: f.pasaporte_vto || null,
       tel: f.tel, mail: f.mail, fecha_nac: f.fecha_nac || null, notas: f.notas,
-      tiene_cuenta_corriente: !!f.tiene_cuenta_corriente,
-      moneda_cc: f.moneda_cc || "USD",
+      tiene_cuenta_corriente: !!(f.cc_usd || f.cc_ars),
+      cc_usd: !!f.cc_usd, cc_ars: !!f.cc_ars,
       cobro_contacto_nombre: f.cobro_contacto_nombre || null,
       cobro_contacto_tel: f.cobro_contacto_tel || null,
       cobro_contacto_mail: f.cobro_contacto_mail || null,
@@ -667,23 +665,22 @@ function ModalCliente({ cliente, onSave, onClose }) {
         </div>
 
         {/* CUENTA CORRIENTE */}
-        <div style={{ padding: "14px", background: f.tiene_cuenta_corriente ? "#0a2040" : "#080f1a", borderRadius: 8, border: "1px solid " + (f.tiene_cuenta_corriente ? "#3b82f644" : "#1e3a5f"), marginBottom: 14 }}>
-          <label style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer", fontSize: 13, fontWeight: 600 }}>
-            <input type="checkbox" checked={!!f.tiene_cuenta_corriente} onChange={e => set("tiene_cuenta_corriente", e.target.checked)} style={{ width: 16, height: 16, cursor: "pointer" }} />
-            💳 Tiene cuenta corriente
-          </label>
-          <div style={{ fontSize: 11, color: "#4a6fa5", marginTop: 4, marginLeft: 26 }}>Los servicios que se le carguen se acumulan en su saldo de CC</div>
-          {f.tiene_cuenta_corriente && (
-            <div style={{ marginTop: 10, marginLeft: 26, display: "flex", alignItems: "center", gap: 10 }}>
-              <label style={{ fontSize: 11, color: "#7a9cc8" }}>Moneda de la CC:</label>
-              <select style={{ ...S.sel, width: "auto", fontSize: 12 }} value={f.moneda_cc || "USD"} onChange={e => set("moneda_cc", e.target.value)}>
-                <option>USD</option><option>ARS</option>
-              </select>
-              {!esNuevo && cliente?.saldo_cc != null && (
-                <span style={{ fontSize: 12, color: (cliente.saldo_cc || 0) >= 0 ? "#10b981" : "#ef4444", fontWeight: 700 }}>
-                  Saldo actual: {fmt(cliente.saldo_cc || 0, cliente.moneda_cc || "USD")}
-                </span>
-              )}
+        <div style={{ padding: "14px", background: tieneCC ? "#0a2040" : "#080f1a", borderRadius: 8, border: "1px solid " + (tieneCC ? "#3b82f644" : "#1e3a5f"), marginBottom: 14 }}>
+          <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 10 }}>💳 Cuenta corriente</div>
+          <div style={{ display: "flex", gap: 20, marginBottom: tieneCC ? 10 : 0 }}>
+            <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 12 }}>
+              <input type="checkbox" checked={!!f.cc_usd} onChange={e => set("cc_usd", e.target.checked)} style={{ width: 15, height: 15 }} />
+              CC en USD
+            </label>
+            <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 12 }}>
+              <input type="checkbox" checked={!!f.cc_ars} onChange={e => set("cc_ars", e.target.checked)} style={{ width: 15, height: 15 }} />
+              CC en ARS
+            </label>
+          </div>
+          {tieneCC && !esNuevo && (
+            <div style={{ display: "flex", gap: 16, fontSize: 12 }}>
+              {f.cc_usd && <span style={{ color: (cliente?.saldo_cc_usd || 0) > 0 ? "#f59e0b" : "#10b981", fontWeight: 700 }}>USD: {fmt(cliente?.saldo_cc_usd || 0, "USD")}</span>}
+              {f.cc_ars && <span style={{ color: (cliente?.saldo_cc_ars || 0) > 0 ? "#f59e0b" : "#10b981", fontWeight: 700 }}>ARS: {fmt(cliente?.saldo_cc_ars || 0, "ARS")}</span>}
             </div>
           )}
         </div>
@@ -1000,10 +997,16 @@ function Clientes({ onSave }) {
                 <td style={S.td}><div style={{ fontSize: 11 }}>{c.tel || "—"}</div><div style={{ fontSize: 11, color: "#4a6fa5" }}>{c.mail || "—"}</div></td>
                 <td style={S.td}><span style={{ fontSize: 11, color: pasVencido ? "#ef4444" : pasUrg ? "#f59e0b" : "#10b981", fontWeight: 600 }}>{pasVencido ? "⚠️ Vencido" : pasUrg ? ("⚠️ " + pasVto + "d") : "✅"}{c.pasaporte_vto ? (" " + fmtD(c.pasaporte_vto)) : ""}</span></td>
                 <td style={S.td}>
-                  {c.tiene_cuenta_corriente && <div style={{ fontSize: 11, fontWeight: 700, color: (c.saldo_cc || 0) >= 0 ? "#3b82f6" : "#ef4444" }}>💳 {fmt(c.saldo_cc || 0, c.moneda_cc || "USD")}</div>}
+                  {(c.cc_usd || c.cc_ars || c.tiene_cuenta_corriente) && (
+                    <div style={{ fontSize: 11, fontWeight: 700 }}>
+                      {c.cc_usd && <span style={{ color: (c.saldo_cc_usd || 0) > 0 ? "#f59e0b" : "#3b82f6" }}>💳 USD: {fmt(c.saldo_cc_usd || 0, "USD")} </span>}
+                      {c.cc_ars && <span style={{ color: (c.saldo_cc_ars || 0) > 0 ? "#f59e0b" : "#3b82f6" }}>💳 ARS: {fmt(c.saldo_cc_ars || 0, "ARS")}</span>}
+                    </div>
+                  )}
+                  {!c.cc_usd && !c.cc_ars && !c.tiene_cuenta_corriente && !c.cobro_contacto_nombre && <span style={{ color: "#1e3a5f" }}>—</span>}
                   {c.cobro_contacto_nombre && <div style={{ fontSize: 10, color: "#c9a84c" }}>📞 {c.cobro_contacto_nombre}</div>}
                   {c.cobro_contacto_tel && <div style={{ fontSize: 10, color: "#4a6fa5" }}>{c.cobro_contacto_tel}</div>}
-                  {!c.tiene_cuenta_corriente && !c.cobro_contacto_nombre && <span style={{ color: "#1e3a5f" }}>—</span>}
+                  {!c.cc_usd && !c.cc_ars && !c.cobro_contacto_nombre && <span style={{ color: "#1e3a5f" }}>—</span>}
                 </td>
                 <td style={S.td}><button style={btnS("ghost", "sm")} onClick={() => setModal(c)}>Editar</button></td>
               </tr>
@@ -1384,16 +1387,21 @@ function TabCC() {
   const [sel, setSel] = useState(null);
   const [movCC, setMovCC] = useState([]);
   const [abonoMonto, setAbonoMonto] = useState("");
+  const [abonoMoneda, setAbonoMoneda] = useState("USD");
   const [abonoConcepto, setAbonoConcepto] = useState("");
   const [saving, setSaving] = useState(false);
 
-  useEffect(() => {
-    supabase.from("clientes").select("*").eq("tiene_cuenta_corriente", true).order("apellido")
-      .then(({ data }) => { setClientes(data || []); setLoading(false); });
+  const cargarClientes = useCallback(async () => {
+    const { data } = await supabase.from("clientes").select("*")
+      .or("cc_usd.eq.true,cc_ars.eq.true,tiene_cuenta_corriente.eq.true").order("apellido");
+    setClientes(data || []); setLoading(false);
   }, []);
+
+  useEffect(() => { cargarClientes(); }, [cargarClientes]);
 
   async function verMovimientos(c) {
     setSel(c);
+    setAbonoMoneda(c.cc_usd ? "USD" : "ARS");
     const { data } = await supabase.from("movimientos").select("*")
       .eq("cliente_nombre", c.nombre + " " + c.apellido)
       .order("fecha", { ascending: false }).limit(30);
@@ -1404,70 +1412,80 @@ function TabCC() {
     if (!abonoMonto || !sel) return;
     setSaving(true);
     const monto = parseFloat(abonoMonto);
+    const campoSaldo = abonoMoneda === "ARS" ? "saldo_cc_ars" : "saldo_cc_usd";
+    const saldoActual = sel[campoSaldo] || 0;
     await supabase.from("movimientos").insert([{
-      tipo: "cobro_cliente", fecha: hoy(), monto_origen: monto, moneda_origen: "USD",
+      tipo: "cobro_cliente", fecha: hoy(), monto_origen: monto, moneda_origen: abonoMoneda,
       cliente_nombre: sel.nombre + " " + sel.apellido,
       concepto: abonoConcepto || "Abono CC — " + sel.nombre + " " + sel.apellido,
     }]);
-    // Reducir saldo CC
-    await supabase.from("clientes").update({ saldo_cc: Math.max(0, (sel.saldo_cc || 0) - monto) }).eq("id", sel.id);
-    // Refrescar
-    const { data: cli } = await supabase.from("clientes").select("*").eq("tiene_cuenta_corriente", true).order("apellido");
-    setClientes(cli || []);
-    const selActualizado = (cli || []).find(c => c.id === sel.id);
-    if (selActualizado) { setSel(selActualizado); verMovimientos(selActualizado); }
+    await supabase.from("clientes").update({ [campoSaldo]: Math.max(0, saldoActual - monto) }).eq("id", sel.id);
+    await cargarClientes();
+    const { data: cli } = await supabase.from("clientes").select("*").eq("id", sel.id).single();
+    if (cli) { setSel(cli); verMovimientos(cli); }
     setAbonoMonto(""); setAbonoConcepto("");
     setSaving(false);
   }
 
-  const totalUSDcc = clientes.filter(c => (c.moneda_cc || "USD") === "USD").reduce((s, c) => s + (c.saldo_cc || 0), 0); const totalARScc = clientes.filter(c => c.moneda_cc === "ARS").reduce((s, c) => s + (c.saldo_cc || 0), 0);
+  const totalUSD = clientes.reduce((s, c) => s + (c.saldo_cc_usd || 0), 0);
+  const totalARS = clientes.reduce((s, c) => s + (c.saldo_cc_ars || 0), 0);
 
   return (
     <div style={{ display: "grid", gridTemplateColumns: "1fr 1.4fr", gap: 16 }}>
       <div>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
           <div style={S.stitle}>Clientes con CC</div>
-          <span style={{ fontSize: 11, color: "#3b82f6", fontWeight: 700 }}>{totalUSDcc > 0 && fmt(totalUSDcc, "USD")} {totalARScc > 0 && fmt(totalARScc, "ARS")}</span>
+          <div style={{ fontSize: 11, fontWeight: 700, textAlign: "right" }}>
+            {totalUSD > 0 && <div style={{ color: "#3b82f6" }}>{fmt(totalUSD, "USD")}</div>}
+            {totalARS > 0 && <div style={{ color: "#c9a84c" }}>{fmt(totalARS, "ARS")}</div>}
+          </div>
         </div>
         {loading ? <Spinner /> : clientes.length === 0
           ? <div style={{ fontSize: 12, color: "#4a6fa5" }}>Ningún cliente tiene CC habilitada</div>
-          : clientes.map(c => (
-            <div key={c.id} onClick={() => verMovimientos(c)} style={{ padding: "12px 14px", background: sel?.id === c.id ? "#1e3a5f" : "#080f1a", borderRadius: 8, marginBottom: 6, cursor: "pointer", border: "1px solid " + (sel?.id === c.id ? "#3b82f6" : "#1e3a5f") }}>
-              <div style={{ display: "flex", justifyContent: "space-between" }}>
-                <div>
-                  <div style={{ fontWeight: 600, fontSize: 13 }}>{c.nombre} {c.apellido}</div>
-                  {c.cobro_contacto_tel && <div style={{ fontSize: 10, color: "#c9a84c" }}>📞 {c.cobro_contacto_tel}</div>}
-                  {c.cobro_contacto_mail && <div style={{ fontSize: 10, color: "#4a6fa5" }}>✉ {c.cobro_contacto_mail}</div>}
-                </div>
-                <div style={{ textAlign: "right" }}>
-                  <div style={{ fontSize: 16, fontWeight: 800, color: (c.saldo_cc || 0) > 0 ? "#f59e0b" : "#10b981" }}>{fmt(c.saldo_cc || 0, c.moneda_cc || "USD")}</div>
-                  <div style={{ fontSize: 9, color: "#4a6fa5" }}>{(c.saldo_cc || 0) > 0 ? "debe" : "saldado"}</div>
+          : clientes.map(c => {
+            const debeUSD = (c.saldo_cc_usd || 0) > 0;
+            const debeARS = (c.saldo_cc_ars || 0) > 0;
+            return (
+              <div key={c.id} onClick={() => verMovimientos(c)} style={{ padding: "12px 14px", background: sel?.id === c.id ? "#1e3a5f" : "#080f1a", borderRadius: 8, marginBottom: 6, cursor: "pointer", border: "1px solid " + (sel?.id === c.id ? "#3b82f6" : "#1e3a5f") }}>
+                <div style={{ display: "flex", justifyContent: "space-between" }}>
+                  <div>
+                    <div style={{ fontWeight: 600, fontSize: 13 }}>{c.nombre} {c.apellido}</div>
+                    {c.cobro_contacto_tel && <div style={{ fontSize: 10, color: "#c9a84c" }}>📞 {c.cobro_contacto_tel}</div>}
+                  </div>
+                  <div style={{ textAlign: "right" }}>
+                    {c.cc_usd && <div style={{ fontSize: 13, fontWeight: 700, color: debeUSD ? "#f59e0b" : "#10b981" }}>{fmt(c.saldo_cc_usd || 0, "USD")}</div>}
+                    {c.cc_ars && <div style={{ fontSize: 13, fontWeight: 700, color: debeARS ? "#f59e0b" : "#10b981" }}>{fmt(c.saldo_cc_ars || 0, "ARS")}</div>}
+                    <div style={{ fontSize: 9, color: "#4a6fa5" }}>{(debeUSD || debeARS) ? "debe" : "saldado"}</div>
+                  </div>
                 </div>
               </div>
-            </div>
-          ))
+            );
+          })
         }
       </div>
       <div>
         {sel ? (
           <div>
             <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 4 }}>{sel.nombre} {sel.apellido}</div>
-            <div style={{ fontSize: 12, color: "#7a9cc8", marginBottom: 14 }}>
-              Saldo CC: <strong style={{ color: (sel.saldo_cc || 0) > 0 ? "#f59e0b" : "#10b981" }}>{fmt(sel.saldo_cc || 0, sel.moneda_cc || "USD")}</strong>
-              {sel.cobro_contacto_nombre && <span style={{ marginLeft: 12, color: "#c9a84c" }}>📞 {sel.cobro_contacto_nombre} {sel.cobro_contacto_tel}</span>}
+            <div style={{ fontSize: 12, color: "#7a9cc8", marginBottom: 14, display: "flex", gap: 16 }}>
+              {sel.cc_usd && <span>USD: <strong style={{ color: (sel.saldo_cc_usd || 0) > 0 ? "#f59e0b" : "#10b981" }}>{fmt(sel.saldo_cc_usd || 0, "USD")}</strong></span>}
+              {sel.cc_ars && <span>ARS: <strong style={{ color: (sel.saldo_cc_ars || 0) > 0 ? "#f59e0b" : "#10b981" }}>{fmt(sel.saldo_cc_ars || 0, "ARS")}</strong></span>}
+              {sel.cobro_contacto_nombre && <span style={{ color: "#c9a84c" }}>📞 {sel.cobro_contacto_nombre} {sel.cobro_contacto_tel}</span>}
             </div>
-            {/* Registrar abono */}
-            {(sel.saldo_cc || 0) > 0 && (
+            {((sel.saldo_cc_usd || 0) > 0 || (sel.saldo_cc_ars || 0) > 0) && (
               <div style={{ padding: "12px 14px", background: "#0a2d1e", borderRadius: 8, marginBottom: 14, border: "1px solid #10b98133" }}>
                 <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 10, color: "#10b981" }}>Registrar abono</div>
                 <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
-                  <input style={{ ...S.inp, flex: 1 }} type="number" value={abonoMonto} onChange={e => setAbonoMonto(e.target.value)} placeholder={"Monto (máx " + fmt(sel.saldo_cc, sel.moneda_cc || "USD") + ")"} />
+                  <select style={{ ...S.sel, width: "auto" }} value={abonoMoneda} onChange={e => setAbonoMoneda(e.target.value)}>
+                    {sel.cc_usd && <option value="USD">USD</option>}
+                    {sel.cc_ars && <option value="ARS">ARS</option>}
+                  </select>
+                  <input style={{ ...S.inp, flex: 1 }} type="number" value={abonoMonto} onChange={e => setAbonoMonto(e.target.value)} placeholder="Monto..." />
                   <button style={{ ...btnS("success"), opacity: saving ? 0.7 : 1 }} onClick={registrarAbono} disabled={saving}>{saving ? "..." : "✓ Cobrar"}</button>
                 </div>
                 <input style={S.inp} value={abonoConcepto} onChange={e => setAbonoConcepto(e.target.value)} placeholder="Concepto (opcional)" />
               </div>
             )}
-            {/* Historial */}
             <div style={S.stitle}>Historial</div>
             {movCC.length === 0 && <div style={{ fontSize: 12, color: "#4a6fa5" }}>Sin movimientos</div>}
             {movCC.map(m => (
