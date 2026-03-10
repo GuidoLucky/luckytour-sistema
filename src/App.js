@@ -239,7 +239,7 @@ function Sidebar({ page, setPage, alertasCount, user, onLogout, collapsed, setCo
 }
 
 // ══ MODAL RESERVA ══
-const FORM_EMPTY = { codigo: "", estado: "Borrador", tipo: "Aéreo", destino: "", pasajero_nombre: "", pasajero_mail: "", pasajero_tel: "", cliente_id: null, fecha_in: "", fecha_out: "", vto_pago: "", vto_cobro: "", vto_reserva: "", proveedor_id: "", proveedor_nombre: "", proveedor_nombre_libre: "", cuenta_proveedor_id: "", habitacion: "", adultos: 1, chd: 0, inf: 0, moneda: "USD", neto: "", venta: "", seguro_compania: "", seguro_poliza: "", seguro_desde: "", seguro_hasta: "", vendedor: "", notas: "", ya_abonado: false, ya_abonado_cuenta_id: "", cobrar_a_cliente_id: null, cobrar_a_nombre: "", _cobrarA_tieneCC: false, _cobrarA_saldoCC: 0 };
+const FORM_EMPTY = { codigo: "", estado: "Borrador", tipo: "Aéreo", destino: "", pasajero_nombre: "", pasajero_mail: "", pasajero_tel: "", cliente_id: null, fecha_in: "", fecha_out: "", vto_pago: "", vto_cobro: "", vto_reserva: "", proveedor_id: "", proveedor_nombre: "", proveedor_nombre_libre: "", cuenta_proveedor_id: "", habitacion: "", adultos: 1, chd: 0, inf: 0, moneda: "USD", neto: "", venta: "", seguro_compania: "", seguro_poliza: "", seguro_desde: "", seguro_hasta: "", vendedor: "", notas: "", ya_abonado: false, ya_abonado_cuenta_id: "", cobrar_a_cliente_id: null, cobrar_a_nombre: "", _cobrarA_tieneCC: false, _cobrarA_saldoCC: 0, _cobrarA_monedaCC: "USD" };
 
 function BuscadorCobrarA({ clientes, cobrarAId, cobrarANombre, onChange }) {
   const [busq, setBusq] = useState(cobrarANombre || "");
@@ -251,12 +251,12 @@ function BuscadorCobrarA({ clientes, cobrarAId, cobrarANombre, onChange }) {
 
   function seleccionar(c) {
     setBusq(c.nombre + " " + c.apellido);
-    onChange(c.id, c.nombre + " " + c.apellido, !!c.tiene_cuenta_corriente, c.saldo_cc || 0);
+    onChange(c.id, c.nombre + " " + c.apellido, !!c.tiene_cuenta_corriente, c.saldo_cc || 0, c.moneda_cc || "USD");
     setMostrar(false);
   }
 
   function limpiar() {
-    setBusq(""); onChange(null, "", false, 0);
+    setBusq(""); onChange(null, "", false, 0, "USD");
   }
 
   return (
@@ -276,7 +276,7 @@ function BuscadorCobrarA({ clientes, cobrarAId, cobrarANombre, onChange }) {
               onMouseDown={() => seleccionar(c)}>
               <span><strong>{c.nombre} {c.apellido}</strong></span>
               <span style={{ fontSize: 10, color: c.tiene_cuenta_corriente ? "#3b82f6" : "#4a6fa5" }}>
-                {c.tiene_cuenta_corriente ? "💳 CC: " + fmt(c.saldo_cc || 0, "USD") : "Sin CC"}
+                {c.tiene_cuenta_corriente ? "💳 CC: " + fmt(c.saldo_cc || 0, c.moneda_cc || "USD") : "Sin CC"}
               </span>
             </div>
           ))}
@@ -442,10 +442,10 @@ function ModalReserva({ reserva, proveedores, clientes, cuentasBancarias, user, 
             {/* COBRAR A */}
             <div style={S.sec}>
               <div style={S.stitle}>¿A quién se le cobra? <span style={{ fontSize: 10, fontWeight: 400, color: "#4a6fa5" }}>(opcional — si es distinto al pasajero)</span></div>
-              <BuscadorCobrarA clientes={clientes} cobrarAId={f.cobrar_a_cliente_id} cobrarANombre={f.cobrar_a_nombre} onChange={(id, nombre, tieneCC, saldoCC) => { set("cobrar_a_cliente_id", id); set("cobrar_a_nombre", nombre); set("_cobrarA_tieneCC", tieneCC); set("_cobrarA_saldoCC", saldoCC); }} />
+              <BuscadorCobrarA clientes={clientes} cobrarAId={f.cobrar_a_cliente_id} cobrarANombre={f.cobrar_a_nombre} onChange={(id, nombre, tieneCC, saldoCC, monedaCC) => { set("cobrar_a_cliente_id", id); set("cobrar_a_nombre", nombre); set("_cobrarA_tieneCC", tieneCC); set("_cobrarA_saldoCC", saldoCC); set("_cobrarA_monedaCC", monedaCC || "USD"); }} />
               {f._cobrarA_tieneCC && (
                 <div style={{ marginTop: 8, padding: "8px 12px", background: "#0a2040", border: "1px solid #3b82f644", borderRadius: 8, fontSize: 11, color: "#3b82f6" }}>
-                  💳 {f.cobrar_a_nombre} tiene cuenta corriente — el cobro se sumará a su CC (saldo actual: {fmt(f._cobrarA_saldoCC || 0, "USD")})
+                  💳 {f.cobrar_a_nombre} tiene cuenta corriente — el cobro se sumará a su CC (saldo actual: {fmt(f._cobrarA_saldoCC || 0, f._cobrarA_monedaCC || "USD")})
                 </div>
               )}
             </div>
@@ -560,7 +560,7 @@ function ModalReserva({ reserva, proveedores, clientes, cuentasBancarias, user, 
 }
 
 // ══ MODAL CLIENTE ══
-const CLI_EMPTY = { nombre: "", apellido: "", dni: "", pasaporte: "", pasaporte_vto: "", tel: "", mail: "", fecha_nac: "", notas: "", tiene_cuenta_corriente: false, cobro_contacto_nombre: "", cobro_contacto_tel: "", cobro_contacto_mail: "" };
+const CLI_EMPTY = { nombre: "", apellido: "", dni: "", pasaporte: "", pasaporte_vto: "", tel: "", mail: "", fecha_nac: "", notas: "", tiene_cuenta_corriente: false, moneda_cc: "USD", cobro_contacto_nombre: "", cobro_contacto_tel: "", cobro_contacto_mail: "" };
 function ModalCliente({ cliente, onSave, onClose }) {
   const esNuevo = !cliente;
   const [f, setF] = useState(cliente || CLI_EMPTY);
@@ -579,6 +579,7 @@ function ModalCliente({ cliente, onSave, onClose }) {
       pasaporte: f.pasaporte, pasaporte_vto: f.pasaporte_vto || null,
       tel: f.tel, mail: f.mail, fecha_nac: f.fecha_nac || null, notas: f.notas,
       tiene_cuenta_corriente: !!f.tiene_cuenta_corriente,
+      moneda_cc: f.moneda_cc || "USD",
       cobro_contacto_nombre: f.cobro_contacto_nombre || null,
       cobro_contacto_tel: f.cobro_contacto_tel || null,
       cobro_contacto_mail: f.cobro_contacto_mail || null,
@@ -615,9 +616,17 @@ function ModalCliente({ cliente, onSave, onClose }) {
             💳 Tiene cuenta corriente
           </label>
           <div style={{ fontSize: 11, color: "#4a6fa5", marginTop: 4, marginLeft: 26 }}>Los servicios que se le carguen se acumulan en su saldo de CC</div>
-          {f.tiene_cuenta_corriente && !esNuevo && cliente?.saldo_cc != null && (
-            <div style={{ marginTop: 8, marginLeft: 26, fontSize: 12, color: (cliente.saldo_cc || 0) >= 0 ? "#10b981" : "#ef4444", fontWeight: 700 }}>
-              Saldo CC actual: {fmt(cliente.saldo_cc || 0, "USD")}
+          {f.tiene_cuenta_corriente && (
+            <div style={{ marginTop: 10, marginLeft: 26, display: "flex", alignItems: "center", gap: 10 }}>
+              <label style={{ fontSize: 11, color: "#7a9cc8" }}>Moneda de la CC:</label>
+              <select style={{ ...S.sel, width: "auto", fontSize: 12 }} value={f.moneda_cc || "USD"} onChange={e => set("moneda_cc", e.target.value)}>
+                <option>USD</option><option>ARS</option>
+              </select>
+              {!esNuevo && cliente?.saldo_cc != null && (
+                <span style={{ fontSize: 12, color: (cliente.saldo_cc || 0) >= 0 ? "#10b981" : "#ef4444", fontWeight: 700 }}>
+                  Saldo actual: {fmt(cliente.saldo_cc || 0, cliente.moneda_cc || "USD")}
+                </span>
+              )}
             </div>
           )}
         </div>
@@ -934,7 +943,7 @@ function Clientes() {
                 <td style={S.td}><div style={{ fontSize: 11 }}>{c.tel || "—"}</div><div style={{ fontSize: 11, color: "#4a6fa5" }}>{c.mail || "—"}</div></td>
                 <td style={S.td}><span style={{ fontSize: 11, color: pasVencido ? "#ef4444" : pasUrg ? "#f59e0b" : "#10b981", fontWeight: 600 }}>{pasVencido ? "⚠️ Vencido" : pasUrg ? ("⚠️ " + pasVto + "d") : "✅"}{c.pasaporte_vto ? (" " + fmtD(c.pasaporte_vto)) : ""}</span></td>
                 <td style={S.td}>
-                  {c.tiene_cuenta_corriente && <div style={{ fontSize: 11, fontWeight: 700, color: (c.saldo_cc || 0) >= 0 ? "#3b82f6" : "#ef4444" }}>💳 {fmt(c.saldo_cc || 0, "USD")}</div>}
+                  {c.tiene_cuenta_corriente && <div style={{ fontSize: 11, fontWeight: 700, color: (c.saldo_cc || 0) >= 0 ? "#3b82f6" : "#ef4444" }}>💳 {fmt(c.saldo_cc || 0, c.moneda_cc || "USD")}</div>}
                   {c.cobro_contacto_nombre && <div style={{ fontSize: 10, color: "#c9a84c" }}>📞 {c.cobro_contacto_nombre}</div>}
                   {c.cobro_contacto_tel && <div style={{ fontSize: 10, color: "#4a6fa5" }}>{c.cobro_contacto_tel}</div>}
                   {!c.tiene_cuenta_corriente && !c.cobro_contacto_nombre && <span style={{ color: "#1e3a5f" }}>—</span>}
@@ -1296,14 +1305,14 @@ function TabCC() {
     setSaving(false);
   }
 
-  const totalCC = clientes.reduce((s, c) => s + (c.saldo_cc || 0), 0);
+  const totalUSDcc = clientes.filter(c => (c.moneda_cc || "USD") === "USD").reduce((s, c) => s + (c.saldo_cc || 0), 0); const totalARScc = clientes.filter(c => c.moneda_cc === "ARS").reduce((s, c) => s + (c.saldo_cc || 0), 0);
 
   return (
     <div style={{ display: "grid", gridTemplateColumns: "1fr 1.4fr", gap: 16 }}>
       <div>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
           <div style={S.stitle}>Clientes con CC</div>
-          <span style={{ fontSize: 11, color: "#3b82f6", fontWeight: 700 }}>Total: {fmt(totalCC, "USD")}</span>
+          <span style={{ fontSize: 11, color: "#3b82f6", fontWeight: 700 }}>{totalUSDcc > 0 && fmt(totalUSDcc, "USD")} {totalARScc > 0 && fmt(totalARScc, "ARS")}</span>
         </div>
         {loading ? <Spinner /> : clientes.length === 0
           ? <div style={{ fontSize: 12, color: "#4a6fa5" }}>Ningún cliente tiene CC habilitada</div>
@@ -1316,7 +1325,7 @@ function TabCC() {
                   {c.cobro_contacto_mail && <div style={{ fontSize: 10, color: "#4a6fa5" }}>✉ {c.cobro_contacto_mail}</div>}
                 </div>
                 <div style={{ textAlign: "right" }}>
-                  <div style={{ fontSize: 16, fontWeight: 800, color: (c.saldo_cc || 0) > 0 ? "#f59e0b" : "#10b981" }}>{fmt(c.saldo_cc || 0, "USD")}</div>
+                  <div style={{ fontSize: 16, fontWeight: 800, color: (c.saldo_cc || 0) > 0 ? "#f59e0b" : "#10b981" }}>{fmt(c.saldo_cc || 0, c.moneda_cc || "USD")}</div>
                   <div style={{ fontSize: 9, color: "#4a6fa5" }}>{(c.saldo_cc || 0) > 0 ? "debe" : "saldado"}</div>
                 </div>
               </div>
@@ -1329,7 +1338,7 @@ function TabCC() {
           <div>
             <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 4 }}>{sel.nombre} {sel.apellido}</div>
             <div style={{ fontSize: 12, color: "#7a9cc8", marginBottom: 14 }}>
-              Saldo CC: <strong style={{ color: (sel.saldo_cc || 0) > 0 ? "#f59e0b" : "#10b981" }}>{fmt(sel.saldo_cc || 0, "USD")}</strong>
+              Saldo CC: <strong style={{ color: (sel.saldo_cc || 0) > 0 ? "#f59e0b" : "#10b981" }}>{fmt(sel.saldo_cc || 0, sel.moneda_cc || "USD")}</strong>
               {sel.cobro_contacto_nombre && <span style={{ marginLeft: 12, color: "#c9a84c" }}>📞 {sel.cobro_contacto_nombre} {sel.cobro_contacto_tel}</span>}
             </div>
             {/* Registrar abono */}
@@ -1337,7 +1346,7 @@ function TabCC() {
               <div style={{ padding: "12px 14px", background: "#0a2d1e", borderRadius: 8, marginBottom: 14, border: "1px solid #10b98133" }}>
                 <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 10, color: "#10b981" }}>Registrar abono</div>
                 <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
-                  <input style={{ ...S.inp, flex: 1 }} type="number" value={abonoMonto} onChange={e => setAbonoMonto(e.target.value)} placeholder={"Monto (máx " + fmt(sel.saldo_cc, "USD") + ")"} />
+                  <input style={{ ...S.inp, flex: 1 }} type="number" value={abonoMonto} onChange={e => setAbonoMonto(e.target.value)} placeholder={"Monto (máx " + fmt(sel.saldo_cc, sel.moneda_cc || "USD") + ")"} />
                   <button style={{ ...btnS("success"), opacity: saving ? 0.7 : 1 }} onClick={registrarAbono} disabled={saving}>{saving ? "..." : "✓ Cobrar"}</button>
                 </div>
                 <input style={S.inp} value={abonoConcepto} onChange={e => setAbonoConcepto(e.target.value)} placeholder="Concepto (opcional)" />
