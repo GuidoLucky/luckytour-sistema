@@ -1120,7 +1120,7 @@ function ModalMovimiento({ proveedores, cuentasBancarias, user, onSave, onClose 
   useEffect(() => {
     if (f.tipo === "pago_proveedor" && f.proveedor_id) {
       supabase.from("reservas")
-        .select("id,codigo,pasajero_nombre,destino,moneda,neto,saldo_pendiente,fecha_in")
+        .select("id,codigo,pasajero_nombre,destino,moneda,neto,saldo_pendiente,fecha_in,cod_proveedor")
         .eq("proveedor_id", parseInt(f.proveedor_id))
         .not("saldo_pendiente", "is", null)
         .gt("saldo_pendiente", 0)
@@ -1130,7 +1130,7 @@ function ModalMovimiento({ proveedores, cuentasBancarias, user, onSave, onClose 
     } else if (f.tipo === "cobro_cliente") {
       // Cargar reservas activas con cobro pendiente
       supabase.from("reservas")
-        .select("id,codigo,pasajero_nombre,destino,moneda,neto,venta,fecha_in,estado")
+        .select("id,codigo,pasajero_nombre,destino,moneda,neto,venta,fecha_in,estado,cod_proveedor")
         .not("estado", "in", "(Cancelada,Cerrada,Pagada)")
         .not("venta", "is", null)
         .order("fecha_in")
@@ -1288,7 +1288,7 @@ function ModalMovimiento({ proveedores, cuentasBancarias, user, onSave, onClose 
                       <div>
                         <span style={{ fontFamily: "monospace", fontSize: 11, color: "#c9a84c" }}>{r.codigo}</span>
                         <span style={{ fontSize: 12, marginLeft: 8 }}>{r.pasajero_nombre}</span>
-                        <div style={{ fontSize: 10, color: "#7a9cc8" }}>{r.destino} · {fmtD(r.fecha_in)}</div>
+                        <div style={{ fontSize: 10, color: "#7a9cc8" }}>{r.destino} · {fmtD(r.fecha_in)}{r.cod_proveedor && <span style={{ color: "#c9a84c", marginLeft: 6 }}>🏷 {r.cod_proveedor}</span>}</div>
                       </div>
                       <div style={{ textAlign: "right" }}>
                         <div style={{ fontSize: 12, fontWeight: 700, color: "#ef4444" }}>{fmt(r.saldo_pendiente, r.moneda)}</div>
@@ -1322,7 +1322,7 @@ function ModalMovimiento({ proveedores, cuentasBancarias, user, onSave, onClose 
                       <div>
                         <span style={{ fontFamily: "monospace", fontSize: 11, color: "#c9a84c" }}>{r.codigo}</span>
                         <span style={{ fontSize: 12, marginLeft: 8 }}>{r.pasajero_nombre}</span>
-                        <div style={{ fontSize: 10, color: "#7a9cc8" }}>{r.destino} · {fmtD(r.fecha_in)}</div>
+                        <div style={{ fontSize: 10, color: "#7a9cc8" }}>{r.destino} · {fmtD(r.fecha_in)}{r.cod_proveedor && <span style={{ color: "#c9a84c", marginLeft: 6 }}>🏷 {r.cod_proveedor}</span>}</div>
                       </div>
                       <div style={{ textAlign: "right" }}>
                         <div style={{ fontSize: 12, fontWeight: 700, color: "#10b981" }}>{fmt(r.pendiente_cobro, r.moneda)}</div>
@@ -1628,7 +1628,7 @@ function Finanzas({ cuentasBancarias, proveedores, user, onSave }) {
     setLoading(true);
     const [{ data: movs }, { data: reservas }, { data: movsCobros }] = await Promise.all([
       supabase.from("movimientos").select("*").order("fecha", { ascending: false }).limit(100),
-      supabase.from("reservas").select("id,codigo,tipo,pasajero_nombre,destino,moneda,venta,neto,saldo_pendiente,proveedor_nombre,fecha_in,estado").not("estado", "in", "(Cancelada,Cerrada)"),
+      supabase.from("reservas").select("id,codigo,tipo,pasajero_nombre,destino,moneda,venta,neto,saldo_pendiente,proveedor_nombre,fecha_in,estado,cod_proveedor").not("estado", "in", "(Cancelada,Cerrada)"),
       supabase.from("movimientos").select("reserva_cod,monto_origen,moneda_origen,tc").eq("tipo", "cobro_cliente"),
     ]);
     setMovimientos(movs || []);
@@ -1733,7 +1733,7 @@ function Finanzas({ cuentasBancarias, proveedores, user, onSave }) {
                   <tr key={r.id}>
                     <td style={{ ...S.td, fontFamily: "monospace", color: "#c9a84c", fontSize: 11 }}>{r.codigo}</td>
                     <td style={S.td}>{r.pasajero_nombre}</td>
-                    <td style={S.td}><div style={{ fontWeight: 500 }}>{r.proveedor_nombre}</div><div style={{ fontSize: 10, color: "#4a6fa5" }}>{r.tipo}</div></td>
+                    <td style={S.td}><div style={{ fontWeight: 500 }}>{r.proveedor_nombre}</div><div style={{ fontSize: 10, color: "#4a6fa5" }}>{r.tipo}</div>{r.cod_proveedor && <div style={{ fontSize: 10, color: "#c9a84c", marginTop: 2 }}>🏷 {r.cod_proveedor}</div>}</td>
                     <td style={S.td}>{fmt(r.neto, r.moneda)}</td>
                     <td style={{ ...S.td, fontWeight: 700, color: "#ef4444" }}>{fmt(r.saldo_pendiente, r.moneda)}</td>
                     <td style={{ ...S.td, fontSize: 11, color: "#7a9cc8" }}>{fmtD(r.fecha_in)}</td>
@@ -1924,7 +1924,7 @@ function Expedientes({ clientes, user, onSave }) {
 
   const cargar = useCallback(async () => {
     setLoading(true);
-    const { data } = await supabase.from("expedientes").select("*, reservas(id,codigo,tipo,estado,destino,fecha_in,fecha_out,proveedor_nombre,moneda,neto,venta,saldo_pendiente,pasajero_nombre)").order("created_at", { ascending: false });
+    const { data } = await supabase.from("expedientes").select("*, reservas(id,codigo,tipo,estado,destino,fecha_in,fecha_out,proveedor_nombre,moneda,neto,venta,saldo_pendiente,pasajero_nombre,cod_proveedor)").order("created_at", { ascending: false });
     setExpedientes(data || []);
     setLoading(false);
   }, []);
@@ -2102,7 +2102,7 @@ function DetalleExpediente({ expediente, onClose, user, clientes }) {
   async function asignar(r) {
     setLoading(true);
     await supabase.from("reservas").update({ expediente_id: expediente.id }).eq("id", r.id);
-    const { data } = await supabase.from("expedientes").select("*, reservas(id,codigo,tipo,estado,destino,fecha_in,fecha_out,proveedor_nombre,moneda,neto,venta,saldo_pendiente,pasajero_nombre)").eq("id", expediente.id).single();
+    const { data } = await supabase.from("expedientes").select("*, reservas(id,codigo,tipo,estado,destino,fecha_in,fecha_out,proveedor_nombre,moneda,neto,venta,saldo_pendiente,pasajero_nombre,cod_proveedor)").eq("id", expediente.id).single();
     setReservasExp(data?.reservas || []);
     setTodasReservas(prev => prev.filter(x => x.id !== r.id));
     setLoading(false);
@@ -2204,6 +2204,7 @@ function DetalleExpediente({ expediente, onClose, user, clientes }) {
               <span style={{ marginLeft: 8 }}><Badge estado={r.estado} /></span>
               <div style={{ fontSize: 12, marginTop: 2 }}>{r.destino} · {fmtD(r.fecha_in)}</div>
               <div style={{ fontSize: 11, color: "#7a9cc8" }}>{r.pasajero_nombre} · {r.proveedor_nombre}</div>
+              {r.cod_proveedor && <div style={{ fontSize: 10, color: "#c9a84c", marginTop: 2 }}>🏷 {r.cod_proveedor}</div>}
             </div>
             <div style={{ textAlign: "right" }}>
               <div style={{ fontSize: 13, fontWeight: 700 }}>{fmt(r.venta, r.moneda)}</div>
