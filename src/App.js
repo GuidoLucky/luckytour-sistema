@@ -13,6 +13,72 @@ const fmtD = (d) => { if (!d) return "—"; const [y, mo, day] = String(d).slice
 const hoy = () => new Date().toISOString().slice(0, 10);
 const diasHasta = (d) => { if (!d) return null; return Math.ceil((new Date(d) - new Date(hoy())) / 86400000); };
 const noches = (a, b) => { if (!a || !b) return 0; return Math.round((new Date(b) - new Date(a)) / 86400000); };
+
+// Envío de mails via Vercel API
+async function sendEmail(to, subject, html) {
+  if (!to) return { ok: false, error: "Sin email" };
+  try {
+    const r = await fetch("/api/send-email", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ to, subject, html }),
+    });
+    return await r.json();
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+}
+
+function htmlConfirmacion(r) {
+  return `
+<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;background:#f8f9fa;padding:20px">
+  <div style="background:#0d1829;padding:24px;border-radius:12px;text-align:center;margin-bottom:20px">
+    <h1 style="color:#c9a84c;margin:0;font-size:22px;letter-spacing:3px">LUCKY TOUR</h1>
+    <p style="color:#7a9cc8;margin:8px 0 0;font-size:12px">CONFIRMACIÓN DE RESERVA</p>
+  </div>
+  <div style="background:#fff;padding:24px;border-radius:12px;margin-bottom:16px">
+    <h2 style="color:#0d1829;margin:0 0 16px">¡Tu reserva está confirmada!</h2>
+    <p style="color:#374151;margin:0 0 20px">Hola <strong>${r.pasajero_nombre}</strong>, te confirmamos tu reserva con los siguientes datos:</p>
+    <table style="width:100%;border-collapse:collapse">
+      <tr><td style="padding:8px 0;border-bottom:1px solid #e5e7eb;color:#6b7280;font-size:13px">Código</td><td style="padding:8px 0;border-bottom:1px solid #e5e7eb;font-weight:700;font-family:monospace;color:#c9a84c">${r.codigo}</td></tr>
+      <tr><td style="padding:8px 0;border-bottom:1px solid #e5e7eb;color:#6b7280;font-size:13px">Destino</td><td style="padding:8px 0;border-bottom:1px solid #e5e7eb;font-weight:600">${r.destino}</td></tr>
+      <tr><td style="padding:8px 0;border-bottom:1px solid #e5e7eb;color:#6b7280;font-size:13px">Servicio</td><td style="padding:8px 0;border-bottom:1px solid #e5e7eb">${r.tipo}${r.habitacion ? " · " + r.habitacion : ""}</td></tr>
+      <tr><td style="padding:8px 0;border-bottom:1px solid #e5e7eb;color:#6b7280;font-size:13px">Fecha de entrada</td><td style="padding:8px 0;border-bottom:1px solid #e5e7eb">${fmtD(r.fecha_in)}${r.fecha_out ? " → " + fmtD(r.fecha_out) : ""}</td></tr>
+      ${r.proveedor_nombre ? `<tr><td style="padding:8px 0;color:#6b7280;font-size:13px">Proveedor</td><td style="padding:8px 0">${r.proveedor_nombre}</td></tr>` : ""}
+    </table>
+  </div>
+  ${r.notas ? `<div style="background:#fef9e7;padding:16px;border-radius:8px;margin-bottom:16px;border-left:4px solid #c9a84c"><p style="margin:0;font-size:13px;color:#374151">${r.notas}</p></div>` : ""}
+  <div style="background:#0d1829;padding:16px;border-radius:8px;text-align:center">
+    <p style="color:#7a9cc8;margin:0;font-size:12px">¿Consultas? Contactanos: guido@luckytourviajes.com</p>
+    <p style="color:#4a6fa5;margin:4px 0 0;font-size:11px">Lucky Tour Viajes</p>
+  </div>
+</div>`;
+}
+
+function htmlVoucher(r) {
+  return `
+<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;background:#f8f9fa;padding:20px">
+  <div style="background:#0d1829;padding:24px;border-radius:12px;text-align:center;margin-bottom:20px">
+    <h1 style="color:#c9a84c;margin:0;font-size:22px;letter-spacing:3px">LUCKY TOUR</h1>
+    <p style="color:#7a9cc8;margin:8px 0 0;font-size:12px">VOUCHER DE VIAJE</p>
+  </div>
+  <div style="background:#fff;padding:24px;border-radius:12px;margin-bottom:16px">
+    <div style="background:#10b981;color:#fff;padding:8px 16px;border-radius:20px;display:inline-block;font-size:12px;font-weight:700;margin-bottom:16px">✓ PAGADO</div>
+    <h2 style="color:#0d1829;margin:0 0 16px">Voucher — ${r.destino}</h2>
+    <table style="width:100%;border-collapse:collapse">
+      <tr><td style="padding:8px 0;border-bottom:1px solid #e5e7eb;color:#6b7280;font-size:13px">Pasajero</td><td style="padding:8px 0;border-bottom:1px solid #e5e7eb;font-weight:700">${r.pasajero_nombre}</td></tr>
+      <tr><td style="padding:8px 0;border-bottom:1px solid #e5e7eb;color:#6b7280;font-size:13px">Código</td><td style="padding:8px 0;border-bottom:1px solid #e5e7eb;font-family:monospace;color:#c9a84c">${r.codigo}</td></tr>
+      <tr><td style="padding:8px 0;border-bottom:1px solid #e5e7eb;color:#6b7280;font-size:13px">Servicio</td><td style="padding:8px 0;border-bottom:1px solid #e5e7eb">${r.tipo}${r.habitacion ? " · " + r.habitacion : ""}</td></tr>
+      <tr><td style="padding:8px 0;border-bottom:1px solid #e5e7eb;color:#6b7280;font-size:13px">Fecha</td><td style="padding:8px 0;border-bottom:1px solid #e5e7eb">${fmtD(r.fecha_in)}${r.fecha_out ? " → " + fmtD(r.fecha_out) : ""}</td></tr>
+      <tr><td style="padding:8px 0;color:#6b7280;font-size:13px">Proveedor</td><td style="padding:8px 0">${r.proveedor_nombre || "—"}</td></tr>
+    </table>
+  </div>
+  <div style="background:#0d1829;padding:16px;border-radius:8px;text-align:center">
+    <p style="color:#7a9cc8;margin:0;font-size:12px">¿Consultas? guido@luckytourviajes.com</p>
+    <p style="color:#4a6fa5;margin:4px 0 0;font-size:11px">Lucky Tour Viajes</p>
+  </div>
+</div>`;
+}
 const paxStr = (r) => { const p = []; if (r.adultos) p.push(r.adultos + "A"); if (r.chd) p.push(r.chd + "CHD"); if (r.inf) p.push(r.inf + "INF"); return p.join(" · "); };
 
 function Badge({ estado }) {
@@ -136,6 +202,7 @@ function Login({ onLogin }) {
 // ══ SIDEBAR ══
 const NAV = [
   { id: "dashboard", icon: "◉", label: "Dashboard" },
+  { id: "expedientes", icon: "📁", label: "Expedientes" },
   { id: "reservas", icon: "✈", label: "Reservas" },
   { id: "clientes", icon: "👤", label: "Clientes" },
   { id: "proveedores", icon: "🏢", label: "Proveedores" },
@@ -1028,51 +1095,356 @@ function Documentos() {
   const [loading, setLoading] = useState(true);
   const [sel, setSel] = useState(null);
   const [saving, setSaving] = useState(false);
-  const cargar = useCallback(async () => { setLoading(true); const [{ data: r }, { data: d }] = await Promise.all([supabase.from("reservas").select("id,codigo,estado,pasajero_nombre,pasajero_mail,destino,fecha_in,fecha_out,venta,moneda").order("created_at", { ascending: false }), supabase.from("reserva_docs").select("*").order("enviado_at", { ascending: false }).limit(50)]); setReservas(r || []); setDocs(d || []); setLoading(false); }, []);
+  const [msgEnvio, setMsgEnvio] = useState("");
+
+  const cargar = useCallback(async () => {
+    setLoading(true);
+    const [{ data: r }, { data: d }] = await Promise.all([
+      supabase.from("reservas").select("*").neq("tipo", "Aéreo").order("created_at", { ascending: false }),
+      supabase.from("reserva_docs").select("*").order("enviado_at", { ascending: false }).limit(50),
+    ]);
+    setReservas(r || []);
+    setDocs(d || []);
+    setLoading(false);
+  }, []);
+
   useEffect(() => { cargar(); }, [cargar]);
-  async function enviar(r, tipo) { setSaving(true); const { error } = await supabase.from("reserva_docs").insert([{ reserva_id: r.id, tipo, asunto: tipo === "confirmacion" ? "✅ Confirmación — " + r.destino : "🎫 Voucher — " + r.destino, para_mail: r.pasajero_mail }]); setSaving(false); if (error) { alert("Error: " + error.message); return; } setSel(null); cargar(); }
+
+  async function enviar(r, tipo) {
+    setSaving(true);
+    setMsgEnvio("");
+    const asunto = tipo === "confirmacion" ? "✅ Confirmación de reserva — " + r.destino : "🎫 Voucher de viaje — " + r.destino;
+    const html = tipo === "confirmacion" ? htmlConfirmacion(r) : htmlVoucher(r);
+
+    // Mandar mail real
+    let mailOk = false;
+    if (r.pasajero_mail) {
+      const res = await sendEmail(r.pasajero_mail, asunto, html);
+      mailOk = res.ok;
+      if (!res.ok) setMsgEnvio("⚠️ Error al enviar mail: " + (res.error || "desconocido"));
+      else setMsgEnvio("✅ Mail enviado a " + r.pasajero_mail);
+    } else {
+      setMsgEnvio("⚠️ El pasajero no tiene email cargado — se registró sin enviar");
+    }
+
+    // Registrar en BD
+    await supabase.from("reserva_docs").insert([{
+      reserva_id: r.id, tipo, asunto, para_mail: r.pasajero_mail,
+      enviado: mailOk,
+    }]);
+    setSaving(false);
+    setSel(null);
+    cargar();
+  }
+
   const disponibles = reservas.filter(r => r.estado !== "Cancelada");
+
   return (
     <div>
       <div style={S.pt}>Documentos</div>
-      <div style={S.ps}>Confirmaciones y vouchers</div>
+      <div style={S.ps}>Confirmaciones y vouchers (excluye aéreos)</div>
+      {msgEnvio && <div style={{ padding: "10px 14px", background: msgEnvio.startsWith("✅") ? "#0a2d1e" : "#2d1a0a", borderRadius: 8, marginBottom: 16, fontSize: 12, color: msgEnvio.startsWith("✅") ? "#10b981" : "#f59e0b" }}>{msgEnvio}</div>}
       {loading ? <Spinner /> : (
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
           <div>
             <div style={{ fontSize: 11, fontWeight: 700, color: "#c9a84c", textTransform: "uppercase", letterSpacing: 1, marginBottom: 12 }}>Reservas</div>
+            {disponibles.length === 0 && <div style={{ ...S.card, fontSize: 12, color: "#4a6fa5" }}>Sin reservas no-aéreas activas</div>}
             {disponibles.map(r => {
               const puedeVoucher = r.estado === "Pagada";
               const puedeConf = ["Confirmada", "Pagada"].includes(r.estado);
               const docsR = docs.filter(d => d.reserva_id === r.id);
               return (
                 <div key={r.id} style={{ ...S.card, marginBottom: 10 }}>
-                  <div style={{ marginBottom: 8 }}><span style={{ fontFamily: "monospace", fontSize: 11, color: "#c9a84c" }}>{r.codigo}</span><span style={{ marginLeft: 8 }}><Badge estado={r.estado} /></span><div style={{ fontSize: 12, fontWeight: 600, marginTop: 3 }}>{r.pasajero_nombre}</div><div style={{ fontSize: 11, color: "#7a9cc8" }}>{r.destino} · {fmtD(r.fecha_in)}</div></div>
+                  <div style={{ marginBottom: 8 }}>
+                    <span style={{ fontFamily: "monospace", fontSize: 11, color: "#c9a84c" }}>{r.codigo}</span>
+                    <span style={{ marginLeft: 8 }}><Badge estado={r.estado} /></span>
+                    <span style={{ marginLeft: 8, fontSize: 10, color: "#4a6fa5" }}>{r.tipo}</span>
+                    <div style={{ fontSize: 12, fontWeight: 600, marginTop: 3 }}>{r.pasajero_nombre}</div>
+                    <div style={{ fontSize: 11, color: "#7a9cc8" }}>{r.destino} · {fmtD(r.fecha_in)}</div>
+                    {!r.pasajero_mail && <div style={{ fontSize: 10, color: "#f59e0b", marginTop: 2 }}>⚠️ Sin email</div>}
+                  </div>
                   <div style={{ display: "flex", gap: 7 }}>
-                    <button style={{ ...btnS(puedeConf ? "blue" : "ghost", "sm"), opacity: puedeConf ? 1 : 0.4, cursor: puedeConf ? "pointer" : "not-allowed" }} onClick={() => puedeConf && setSel({ r, tipo: "confirmacion" })}>✅ {docsR.some(d => d.tipo === "confirmacion") ? "Re-enviar" : "Confirmación"}</button>
-                    <button style={{ ...btnS(puedeVoucher ? "success" : "ghost", "sm"), opacity: puedeVoucher ? 1 : 0.4, cursor: puedeVoucher ? "pointer" : "not-allowed" }} onClick={() => puedeVoucher && setSel({ r, tipo: "voucher" })}>🎫 {docsR.some(d => d.tipo === "voucher") ? "Re-enviar" : "Voucher"}</button>
+                    <button style={{ ...btnS(puedeConf ? "blue" : "ghost", "sm"), opacity: puedeConf ? 1 : 0.4, cursor: puedeConf ? "pointer" : "not-allowed" }} onClick={() => puedeConf && setSel({ r, tipo: "confirmacion" })}>
+                      ✅ {docsR.some(d => d.tipo === "confirmacion") ? "Re-enviar" : "Confirmación"}
+                    </button>
+                    <button style={{ ...btnS(puedeVoucher ? "success" : "ghost", "sm"), opacity: puedeVoucher ? 1 : 0.4, cursor: puedeVoucher ? "pointer" : "not-allowed" }} onClick={() => puedeVoucher && setSel({ r, tipo: "voucher" })}>
+                      🎫 {docsR.some(d => d.tipo === "voucher") ? "Re-enviar" : "Voucher"}
+                    </button>
                   </div>
                 </div>
               );
             })}
           </div>
           <div>
-            <div style={{ fontSize: 11, fontWeight: 700, color: "#c9a84c", textTransform: "uppercase", letterSpacing: 1, marginBottom: 12 }}>Historial</div>
-            <div style={S.card}>{docs.map((d, i) => { const r = reservas.find(x => x.id === d.reserva_id); return <div key={i} style={{ display: "flex", gap: 10, padding: "10px 0", borderBottom: "1px solid #0f2040" }}><span style={{ fontSize: 18 }}>{d.tipo === "confirmacion" ? "✅" : "🎫"}</span><div style={{ flex: 1 }}><div style={{ fontSize: 12, fontWeight: 500 }}>{d.asunto}</div><div style={{ fontSize: 10, color: "#4a6fa5" }}>{r?.pasajero_nombre} · {fmtD((d.enviado_at || "").slice(0, 10))}</div></div></div>; })}{docs.length === 0 && <div style={{ fontSize: 12, color: "#4a6fa5" }}>Sin envíos</div>}</div>
+            <div style={{ fontSize: 11, fontWeight: 700, color: "#c9a84c", textTransform: "uppercase", letterSpacing: 1, marginBottom: 12 }}>Historial de envíos</div>
+            <div style={S.card}>
+              {docs.map((d, i) => {
+                const r = reservas.find(x => x.id === d.reserva_id);
+                return (
+                  <div key={i} style={{ display: "flex", gap: 10, padding: "10px 0", borderBottom: "1px solid #0f2040" }}>
+                    <span style={{ fontSize: 18 }}>{d.tipo === "confirmacion" ? "✅" : "🎫"}</span>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: 12, fontWeight: 500 }}>{d.asunto}</div>
+                      <div style={{ fontSize: 10, color: "#4a6fa5" }}>{r?.pasajero_nombre} · {fmtD((d.enviado_at || "").slice(0, 10))}</div>
+                      <div style={{ fontSize: 10, color: d.enviado ? "#10b981" : "#f59e0b" }}>{d.enviado ? "✓ Enviado" : "⚠ Sin mail"}</div>
+                    </div>
+                  </div>
+                );
+              })}
+              {docs.length === 0 && <div style={{ fontSize: 12, color: "#4a6fa5" }}>Sin envíos</div>}
+            </div>
           </div>
         </div>
       )}
       {sel && (
         <div style={S.modal} onClick={() => setSel(null)}>
           <div style={mbox(480)} onClick={e => e.stopPropagation()}>
-            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 18 }}><div style={{ fontWeight: 700 }}>{sel.tipo === "confirmacion" ? "✅ Enviar confirmación" : "🎫 Enviar voucher"}</div><button style={btnS("ghost", "sm")} onClick={() => setSel(null)}>✕</button></div>
-            <div style={{ padding: "14px", background: "#080f1a", borderRadius: 8, marginBottom: 16, fontSize: 12 }}><strong>{sel.r.pasajero_nombre}</strong> — {sel.r.pasajero_mail}<br /><span style={{ color: "#4a6fa5" }}>{sel.r.codigo} · {sel.r.destino} · {fmtD(sel.r.fecha_in)}</span></div>
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 18 }}>
+              <div style={{ fontWeight: 700 }}>{sel.tipo === "confirmacion" ? "✅ Enviar confirmación" : "🎫 Enviar voucher"}</div>
+              <button style={btnS("ghost", "sm")} onClick={() => setSel(null)}>✕</button>
+            </div>
+            <div style={{ padding: "14px", background: "#080f1a", borderRadius: 8, marginBottom: 16, fontSize: 12 }}>
+              <strong>{sel.r.pasajero_nombre}</strong><br />
+              <span style={{ color: sel.r.pasajero_mail ? "#10b981" : "#f59e0b" }}>
+                {sel.r.pasajero_mail || "⚠️ Sin email — se registrará sin enviar"}
+              </span><br />
+              <span style={{ color: "#4a6fa5" }}>{sel.r.codigo} · {sel.r.destino} · {fmtD(sel.r.fecha_in)}</span>
+            </div>
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
               <button style={btnS("ghost")} onClick={() => setSel(null)}>Cancelar</button>
-              <button style={{ ...btnS(sel.tipo === "confirmacion" ? "blue" : "success"), opacity: saving ? 0.7 : 1 }} onClick={() => enviar(sel.r, sel.tipo)} disabled={saving}>{saving ? "Registrando..." : sel.tipo === "confirmacion" ? "✅ Registrar" : "🎫 Registrar"}</button>
+              <button style={{ ...btnS(sel.tipo === "confirmacion" ? "blue" : "success"), opacity: saving ? 0.7 : 1 }} onClick={() => enviar(sel.r, sel.tipo)} disabled={saving}>
+                {saving ? "Enviando..." : sel.tipo === "confirmacion" ? "✅ Enviar" : "🎫 Enviar"}
+              </button>
             </div>
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+// ══ EXPEDIENTES ══
+function Expedientes({ clientes, user }) {
+  const [expedientes, setExpedientes] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [modal, setModal] = useState(null); // null | "nuevo" | expediente
+  const [detalle, setDetalle] = useState(null);
+
+  const cargar = useCallback(async () => {
+    setLoading(true);
+    const { data } = await supabase.from("expedientes").select("*, reservas(id,codigo,tipo,estado,destino,fecha_in,fecha_out,proveedor_nombre,moneda,neto,venta,saldo_pendiente,pasajero_nombre)").order("created_at", { ascending: false });
+    setExpedientes(data || []);
+    setLoading(false);
+  }, []);
+
+  useEffect(() => { cargar(); }, [cargar]);
+
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+        <div><div style={S.pt}>Expedientes</div><div style={S.ps}>{expedientes.length} expedientes</div></div>
+        <button style={btnS("pri")} onClick={() => setModal("nuevo")}>+ Nuevo expediente</button>
+      </div>
+      {loading ? <Spinner /> : (
+        expedientes.length === 0
+          ? <div style={{ ...S.card, textAlign: "center", padding: 60, color: "#4a6fa5" }}>Ningún expediente todavía. Creá uno para agrupar servicios de un mismo viaje.</div>
+          : expedientes.map(exp => {
+            const reservas = exp.reservas || [];
+            const totalVenta = reservas.reduce((s, r) => r.moneda === "USD" ? s + (r.venta || 0) : s, 0);
+            const totalPendiente = reservas.reduce((s, r) => r.moneda === "USD" ? s + (r.saldo_pendiente || 0) : s, 0);
+            const estados = [...new Set(reservas.map(r => r.estado))];
+            return (
+              <div key={exp.id} style={{ ...S.card, marginBottom: 12, cursor: "pointer" }} onClick={() => setDetalle(exp)}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                  <div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4 }}>
+                      <span style={{ fontFamily: "monospace", fontSize: 11, color: "#c9a84c" }}>{exp.codigo}</span>
+                      <span style={{ fontSize: 11, color: "#4a6fa5", background: "#0f2040", padding: "2px 8px", borderRadius: 10 }}>{exp.estado}</span>
+                    </div>
+                    <div style={{ fontWeight: 700, fontSize: 15 }}>{exp.nombre}</div>
+                    <div style={{ fontSize: 12, color: "#7a9cc8", marginTop: 2 }}>{exp.pasajero_nombre}</div>
+                  </div>
+                  <div style={{ textAlign: "right" }}>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: "#c9a84c" }}>{fmt(totalVenta, "USD")}</div>
+                    {totalPendiente > 0 && <div style={{ fontSize: 11, color: "#ef4444" }}>{fmt(totalPendiente, "USD")} pendiente</div>}
+                  </div>
+                </div>
+                <div style={{ display: "flex", gap: 6, marginTop: 10, flexWrap: "wrap" }}>
+                  {reservas.map(r => (
+                    <span key={r.id} style={{ fontSize: 10, padding: "3px 8px", borderRadius: 8, background: "#0f2040", color: "#7a9cc8", border: "1px solid #1e3a5f" }}>
+                      {r.tipo} · {r.destino} · <Badge estado={r.estado} />
+                    </span>
+                  ))}
+                  {reservas.length === 0 && <span style={{ fontSize: 11, color: "#4a6fa5" }}>Sin servicios asignados</span>}
+                </div>
+              </div>
+            );
+          })
+      )}
+      {modal && <ModalExpediente expediente={modal === "nuevo" ? null : modal} clientes={clientes} user={user} onSave={() => { setModal(null); cargar(); }} onClose={() => setModal(null)} />}
+      {detalle && <DetalleExpediente expediente={detalle} onClose={() => { setDetalle(null); cargar(); }} user={user} />}
+    </div>
+  );
+}
+
+function ModalExpediente({ expediente, clientes, user, onSave, onClose }) {
+  const esNuevo = !expediente;
+  const [nombre, setNombre] = useState(expediente?.nombre || "");
+  const [pasajero, setPasajero] = useState(expediente?.pasajero_nombre || "");
+  const [clienteId, setClienteId] = useState(expediente?.cliente_id || null);
+  const [notas, setNotas] = useState(expediente?.notas || "");
+  const [busq, setBusq] = useState(expediente?.pasajero_nombre || "");
+  const [mostrarBusq, setMostrarBusq] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  const clientesFiltrados = clientes.filter(c => {
+    const s = busq.toLowerCase();
+    return s.length >= 2 && (c.nombre + " " + c.apellido).toLowerCase().includes(s);
+  }).slice(0, 6);
+
+  async function guardar() {
+    if (!nombre) { alert("El nombre es requerido"); return; }
+    setSaving(true);
+    let codigo = expediente?.codigo;
+    if (!codigo) {
+      const { count } = await supabase.from("expedientes").select("*", { count: "exact", head: true });
+      codigo = "EXP-" + new Date().getFullYear() + "-" + String((count || 0) + 1).padStart(3, "0");
+    }
+    const payload = { codigo, nombre, pasajero_nombre: pasajero, cliente_id: clienteId || null, notas };
+    let error;
+    if (esNuevo) { ({ error } = await supabase.from("expedientes").insert([payload])); }
+    else { ({ error } = await supabase.from("expedientes").update(payload).eq("id", expediente.id)); }
+    setSaving(false);
+    if (error) { alert("Error: " + error.message); return; }
+    onSave();
+  }
+
+  return (
+    <div style={S.modal} onClick={onClose}>
+      <div style={mbox(500)} onClick={e => e.stopPropagation()}>
+        <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 20 }}>
+          <div style={{ fontWeight: 700, fontSize: 16 }}>{esNuevo ? "Nuevo expediente" : "Editar expediente"}</div>
+          <button style={btnS("ghost", "sm")} onClick={onClose}>✕</button>
+        </div>
+        <div style={S.fg}><label style={S.fl}>Nombre del viaje *</label><input style={S.inp} value={nombre} onChange={e => setNombre(e.target.value)} placeholder="Ej: Miami Abril 2026 — Familia Altberg" /></div>
+        <div style={{ position: "relative", marginBottom: 14 }}>
+          <label style={S.fl}>Buscar pasajero</label>
+          <input style={S.inp} value={busq} onChange={e => { setBusq(e.target.value); setMostrarBusq(true); }} onFocus={() => setMostrarBusq(true)} onBlur={() => setTimeout(() => setMostrarBusq(false), 200)} placeholder="Nombre o apellido..." />
+          {mostrarBusq && clientesFiltrados.length > 0 && (
+            <div style={{ position: "absolute", top: "100%", left: 0, right: 0, background: "#0d1829", border: "1px solid #1e3a5f", borderRadius: 8, zIndex: 100 }}>
+              {clientesFiltrados.map(c => <div key={c.id} style={{ padding: "10px 14px", cursor: "pointer", borderBottom: "1px solid #1e3a5f", fontSize: 12 }} onMouseDown={() => { setPasajero(c.nombre + " " + c.apellido); setClienteId(c.id); setBusq(c.nombre + " " + c.apellido); setMostrarBusq(false); }}>{c.nombre} {c.apellido}</div>)}
+            </div>
+          )}
+        </div>
+        <div style={S.fg}><label style={S.fl}>Notas</label><textarea style={{ ...S.inp, minHeight: 70, resize: "vertical" }} value={notas} onChange={e => setNotas(e.target.value)} /></div>
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+          <button style={btnS("ghost")} onClick={onClose}>Cancelar</button>
+          <button style={{ ...btnS("pri"), opacity: saving ? 0.7 : 1 }} onClick={guardar} disabled={saving}>{saving ? "Guardando..." : esNuevo ? "✓ Crear" : "✓ Guardar"}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DetalleExpediente({ expediente, onClose, user }) {
+  const [reservasExp, setReservasExp] = useState(expediente.reservas || []);
+  const [todasReservas, setTodasReservas] = useState([]);
+  const [asignando, setAsignando] = useState(false);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    supabase.from("reservas").select("id,codigo,tipo,estado,destino,fecha_in,proveedor_nombre,moneda,neto,venta,saldo_pendiente,pasajero_nombre,expediente_id")
+      .is("expediente_id", null).not("estado", "in", "(Cancelada,Cerrada)")
+      .order("created_at", { ascending: false })
+      .then(({ data }) => setTodasReservas(data || []));
+  }, []);
+
+  async function asignar(r) {
+    setLoading(true);
+    await supabase.from("reservas").update({ expediente_id: expediente.id }).eq("id", r.id);
+    const { data } = await supabase.from("expedientes").select("*, reservas(id,codigo,tipo,estado,destino,fecha_in,fecha_out,proveedor_nombre,moneda,neto,venta,saldo_pendiente,pasajero_nombre)").eq("id", expediente.id).single();
+    setReservasExp(data?.reservas || []);
+    setTodasReservas(prev => prev.filter(x => x.id !== r.id));
+    setLoading(false);
+  }
+
+  async function desasignar(r) {
+    setLoading(true);
+    await supabase.from("reservas").update({ expediente_id: null }).eq("id", r.id);
+    setReservasExp(prev => prev.filter(x => x.id !== r.id));
+    setTodasReservas(prev => [...prev, { ...r, expediente_id: null }]);
+    setLoading(false);
+  }
+
+  const totalVenta = reservasExp.reduce((s, r) => r.moneda === "USD" ? s + (r.venta || 0) : s, 0);
+  const totalNeto = reservasExp.reduce((s, r) => r.moneda === "USD" ? s + (r.neto || 0) : s, 0);
+  const totalPendiente = reservasExp.reduce((s, r) => r.moneda === "USD" ? s + (r.saldo_pendiente || 0) : s, 0);
+
+  return (
+    <div style={S.modal} onClick={onClose}>
+      <div style={{ ...mbox(700), maxHeight: "90vh", overflowY: "auto" }} onClick={e => e.stopPropagation()}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+          <div>
+            <div style={{ fontFamily: "monospace", fontSize: 11, color: "#c9a84c", marginBottom: 3 }}>{expediente.codigo}</div>
+            <div style={{ fontWeight: 700, fontSize: 17 }}>{expediente.nombre}</div>
+            <div style={{ fontSize: 12, color: "#7a9cc8" }}>{expediente.pasajero_nombre}</div>
+          </div>
+          <button style={btnS("ghost", "sm")} onClick={onClose}>✕</button>
+        </div>
+
+        {/* Totales */}
+        <div style={{ display: "flex", gap: 12, marginBottom: 20, flexWrap: "wrap" }}>
+          <Stat label="Venta total" value={fmt(totalVenta, "USD")} color="#c9a84c" />
+          <Stat label="Neto total" value={fmt(totalNeto, "USD")} color="#ef4444" />
+          <Stat label="Margen" value={fmt(totalVenta - totalNeto, "USD")} color="#10b981" />
+          <Stat label="Pendiente pago" value={fmt(totalPendiente, "USD")} color={totalPendiente > 0 ? "#f59e0b" : "#10b981"} />
+        </div>
+
+        {/* Servicios asignados */}
+        <div style={S.stitle}>Servicios del expediente</div>
+        {reservasExp.length === 0 && <div style={{ fontSize: 12, color: "#4a6fa5", marginBottom: 16 }}>Sin servicios asignados todavía</div>}
+        {reservasExp.map(r => (
+          <div key={r.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", background: "#080f1a", borderRadius: 8, marginBottom: 8 }}>
+            <div>
+              <span style={{ fontFamily: "monospace", fontSize: 11, color: "#c9a84c" }}>{r.codigo}</span>
+              <span style={{ marginLeft: 8, fontSize: 11, color: "#4a6fa5" }}>{r.tipo}</span>
+              <span style={{ marginLeft: 8 }}><Badge estado={r.estado} /></span>
+              <div style={{ fontSize: 12, marginTop: 2 }}>{r.destino} · {fmtD(r.fecha_in)}</div>
+              <div style={{ fontSize: 11, color: "#7a9cc8" }}>{r.proveedor_nombre}</div>
+            </div>
+            <div style={{ textAlign: "right" }}>
+              <div style={{ fontSize: 13, fontWeight: 700 }}>{fmt(r.venta, r.moneda)}</div>
+              {(r.saldo_pendiente || 0) > 0 && <div style={{ fontSize: 10, color: "#ef4444" }}>{fmt(r.saldo_pendiente, r.moneda)} pendiente</div>}
+              <button style={{ ...btnS("ghost", "sm"), marginTop: 4, fontSize: 10 }} onClick={() => desasignar(r)}>Quitar</button>
+            </div>
+          </div>
+        ))}
+
+        {/* Asignar reservas */}
+        <div style={{ marginTop: 16 }}>
+          <button style={{ ...btnS(asignando ? "secondary" : "ghost"), marginBottom: 12 }} onClick={() => setAsignando(!asignando)}>
+            {asignando ? "▲ Cerrar" : "+ Agregar servicio"}
+          </button>
+          {asignando && (
+            <div>
+              <div style={{ fontSize: 11, color: "#4a6fa5", marginBottom: 8 }}>Reservas sin expediente asignado:</div>
+              {todasReservas.length === 0 && <div style={{ fontSize: 12, color: "#4a6fa5" }}>No hay reservas disponibles</div>}
+              {todasReservas.map(r => (
+                <div key={r.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", background: "#080f1a", borderRadius: 8, marginBottom: 6 }}>
+                  <div>
+                    <span style={{ fontFamily: "monospace", fontSize: 11, color: "#c9a84c" }}>{r.codigo}</span>
+                    <span style={{ marginLeft: 8, fontSize: 11 }}>{r.tipo} · {r.destino}</span>
+                    <div style={{ fontSize: 11, color: "#7a9cc8" }}>{r.pasajero_nombre} · {fmtD(r.fecha_in)}</div>
+                  </div>
+                  <button style={btnS("blue", "sm")} onClick={() => asignar(r)} disabled={loading}>+ Asignar</button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {expediente.notas && <div style={{ marginTop: 16, padding: "12px 14px", background: "#080f1a", borderRadius: 8, fontSize: 12, color: "#7a9cc8" }}>{expediente.notas}</div>}
+      </div>
     </div>
   );
 }
@@ -1140,6 +1512,7 @@ export default function App() {
         </div>
         <div style={{ flex: 1, padding: 24, overflowY: "auto" }}>
           {page === "dashboard" && <Dashboard reservas={reservasDash} movimientos={movimientosDash} alertas={alertasAll} setPage={setPage} />}
+          {page === "expedientes" && <Expedientes clientes={clientes} user={user} />}
           {page === "reservas" && <Reservas proveedores={proveedores} clientes={clientes} user={user} />}
           {page === "clientes" && <Clientes />}
           {page === "proveedores" && <Proveedores proveedores={proveedores} />}
