@@ -2247,9 +2247,16 @@ export default function App() {
   const [cuentasBancarias, setCuentasBancarias] = useState([]);
   const [reservasDash, setReservasDash] = useState([]);
   const [movimientosDash, setMovimientosDash] = useState([]);
-  const [alertasDesc, setAlertasDesc] = useState(() => {
-    try { return JSON.parse(localStorage.getItem("alertas_desc_" + (user?.id || "x")) || "[]"); } catch { return []; }
-  });
+  const [alertasDesc, setAlertasDesc] = useState([]);
+
+  // Cargar alertas descartadas cuando el user esté disponible
+  useEffect(() => {
+    if (!user) return;
+    try {
+      const guardadas = JSON.parse(localStorage.getItem("alertas_desc_" + user.id) || "[]");
+      setAlertasDesc(guardadas);
+    } catch {}
+  }, [user?.id]);
 
   function descartarAlerta(id) {
     setAlertasDesc(d => {
