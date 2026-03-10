@@ -1,0 +1,6 @@
+{
+  "functions": {
+    "api/send-email.js": { "runtime": "nodejs18.x" },
+    "api/send-doc.py":   { "runtime": "python3.9", "maxDuration": 30 }
+  }
+}
