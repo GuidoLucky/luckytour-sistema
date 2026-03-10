@@ -108,11 +108,10 @@ def gen_confirmacion_pdf(r):
         topMargin=1.5*cm, bottomMargin=1.5*cm,
         leftMargin=2*cm, rightMargin=2*cm)
 
-    sf = lambda **kw: ParagraphStyle("s", fontName="Helvetica", fontSize=11, textColor=navy, **kw)
-    s_fecha = sf(fontSize=10, alignment=TA_RIGHT)
-    s_hotel = sf(fontSize=13, fontName="Helvetica-Bold", alignment=TA_CENTER)
-    s_cell  = sf(alignment=TA_CENTER)
-    s_lbl   = sf(alignment=TA_LEFT)
+    s_fecha = ParagraphStyle("s_fecha", fontName="Helvetica",      fontSize=10, textColor=navy, alignment=TA_RIGHT)
+    s_hotel = ParagraphStyle("s_hotel", fontName="Helvetica-Bold", fontSize=13, textColor=navy, alignment=TA_CENTER)
+    s_cell  = ParagraphStyle("s_cell",  fontName="Helvetica",      fontSize=11, textColor=navy, alignment=TA_CENTER)
+    s_lbl   = ParagraphStyle("s_lbl",   fontName="Helvetica",      fontSize=11, textColor=navy, alignment=TA_LEFT)
 
     hotel    = r.get("proveedor_nombre") or r.get("destino", "")
     titular  = r.get("pasajero_nombre", "")
