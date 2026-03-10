@@ -165,44 +165,15 @@ def gen_confirmacion_pdf(r):
     return buf.read()
 
 
-def _send_resend(to, subject, nombre, pdf_bytes, filename):
-    import urllib.request
-    payload = json.dumps({
-        "from":    "Lucky Tour <guido@luckytourviajes.com>",
-        "to":      [to],
-        "subject": subject,
-        "html":    f"<p>Hola <b>{nombre}</b>,</p><p>Adjuntamos tu documento de viaje.</p><p>Cualquier consulta no dudes en contactarnos.<br><b>Lucky Tour Viajes</b></p>",
-        "attachments": [{
-            "filename": filename,
-            "content":  base64.b64encode(pdf_bytes).decode()
-        }]
-    }).encode()
-    api_key = os.environ.get("RESEND_API_KEY", "")
-    req = urllib.request.Request(
-        "https://api.resend.com/emails",
-        data=payload,
-        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-        method="POST"
-    )
-    import urllib.error
-    try:
-        with urllib.request.urlopen(req) as resp:
-            return json.loads(resp.read())
-    except urllib.error.HTTPError as e:
-        body = e.read().decode('utf-8', errors='replace')
-        raise Exception(f'Resend {e.code}: {body}')
-
-
 class handler(BaseHTTPRequestHandler):
     def do_POST(self):
         try:
             length = int(self.headers.get("Content-Length", 0))
             body   = json.loads(self.rfile.read(length))
             tipo   = body.get("tipo")
-            to     = body.get("to")
             r      = body.get("reserva", {})
 
-            if not tipo or not to or not r:
+            if not tipo or not r:
                 self._respond(400, {"error": "Faltan campos"})
                 return
 
@@ -212,14 +183,19 @@ class handler(BaseHTTPRequestHandler):
             if tipo == "voucher":
                 pdf   = gen_voucher_pdf(r)
                 fname = f"Voucher_{nombre.replace(' ','_')}.pdf"
-                subj  = f"🎫 Voucher de viaje — {hotel}"
+                subj  = f"Voucher de viaje — {hotel}"
             else:
                 pdf   = gen_confirmacion_pdf(r)
                 fname = f"Confirmacion_{nombre.replace(' ','_')}.pdf"
-                subj  = f"✅ Confirmación de reserva — {hotel}"
+                subj  = f"Confirmacion de reserva — {hotel}"
 
-            data = _send_resend(to, subj, nombre, pdf, fname)
-            self._respond(200, {"ok": True, "id": data.get("id")})
+            self._respond(200, {
+                "ok": True,
+                "pdf": base64.b64encode(pdf).decode(),
+                "filename": fname,
+                "subject": subj,
+                "nombre": nombre,
+            })
 
         except Exception as e:
             self._respond(500, {"error": str(e)})
