@@ -997,9 +997,13 @@ function ModalMovimiento({ proveedores, cuentasBancarias, user, onSave, onClose 
             {/* RESERVAS PENDIENTES */}
             {reservasPendientes.length > 0 && (
               <div style={{ marginBottom: 14 }}>
-                <label style={S.fl}>Reservas pendientes de pago</label>
+                <label style={S.fl}>Reservas pendientes de pago ({reservasPendientes.length})</label>
+                <input style={{ ...S.inp, marginBottom: 4 }} placeholder="Buscar por pasajero, código o destino..." value={f._busqPago || ""} onChange={e => set("_busqPago", e.target.value)} />
                 <div style={{ maxHeight: 200, overflowY: "auto", border: "1px solid #1e3a5f", borderRadius: 8 }}>
-                  {reservasPendientes.map(r => (
+                  {reservasPendientes.filter(r => {
+                    const s = (f._busqPago || "").toLowerCase();
+                    return !s || (r.pasajero_nombre || "").toLowerCase().includes(s) || (r.codigo || "").toLowerCase().includes(s) || (r.destino || "").toLowerCase().includes(s);
+                  }).map(r => (
                     <div key={r.id} onClick={() => selReserva(r)} style={{ padding: "10px 14px", cursor: "pointer", borderBottom: "1px solid #0f2040", background: reservaSel?.id === r.id ? "#1e3a5f" : "transparent", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                       <div>
                         <span style={{ fontFamily: "monospace", fontSize: 11, color: "#c9a84c" }}>{r.codigo}</span>
@@ -1027,9 +1031,13 @@ function ModalMovimiento({ proveedores, cuentasBancarias, user, onSave, onClose 
             <div style={S.fg}><label style={S.fl}>Cliente (nombre libre)</label><input style={S.inp} value={f.cliente_nombre} onChange={e => set("cliente_nombre", e.target.value)} placeholder="O seleccioná una reserva abajo..." /></div>
             {reservasPendientes.length > 0 && (
               <div style={{ marginBottom: 14 }}>
-                <label style={S.fl}>Reservas con cobro pendiente</label>
+                <label style={S.fl}>Reservas con cobro pendiente ({reservasPendientes.length})</label>
+                <input style={{ ...S.inp, marginBottom: 4 }} placeholder="Buscar por pasajero, código o destino..." value={f._busqCobro || ""} onChange={e => set("_busqCobro", e.target.value)} />
                 <div style={{ maxHeight: 200, overflowY: "auto", border: "1px solid #1e3a5f", borderRadius: 8 }}>
-                  {reservasPendientes.map(r => (
+                  {reservasPendientes.filter(r => {
+                    const s = (f._busqCobro || "").toLowerCase();
+                    return !s || (r.pasajero_nombre || "").toLowerCase().includes(s) || (r.codigo || "").toLowerCase().includes(s) || (r.destino || "").toLowerCase().includes(s);
+                  }).map(r => (
                     <div key={r.id} onClick={() => selReserva(r)} style={{ padding: "10px 14px", cursor: "pointer", borderBottom: "1px solid #0f2040", background: reservaSel?.id === r.id ? "#1e3a5f" : "transparent", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                       <div>
                         <span style={{ fontFamily: "monospace", fontSize: 11, color: "#c9a84c" }}>{r.codigo}</span>
