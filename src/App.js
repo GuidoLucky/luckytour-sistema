@@ -1029,10 +1029,10 @@ function ModalProveedor({ proveedor, onSave, onClose }) {
     if (esNuevo) {
       const { data: p, error } = await supabase.from("proveedores").insert([{ nombre: nombre.trim(), tipo: tipo.trim() }]).select().single();
       if (!error && p) {
-        // Crear automáticamente cuenta USD y ARS
+        const prefijo = nombre.trim().toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 4) + p.id;
         await supabase.from("cuentas_proveedor").insert([
-          { proveedor_id: p.id, nombre: nombre.trim() + " USD", moneda: "USD", saldo: 0 },
-          { proveedor_id: p.id, nombre: nombre.trim() + " ARS", moneda: "ARS", saldo: 0 },
+          { id: prefijo + "usd", proveedor_id: p.id, nombre: nombre.trim() + " USD", moneda: "USD", saldo: 0 },
+          { id: prefijo + "ars", proveedor_id: p.id, nombre: nombre.trim() + " ARS", moneda: "ARS", saldo: 0 },
         ]);
       }
       if (error) { setSaving(false); alert("Error: " + error.message); return; }
