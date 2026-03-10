@@ -836,26 +836,62 @@ function ModalMovimiento({ proveedores, cuentasBancarias, user, onSave, onClose 
   const set = (k, v) => setF(x => ({ ...x, [k]: v }));
   const provSel = proveedores.find(p => String(p.id) === String(f.proveedor_id));
 
-  // Cargar reservas pendientes cuando se selecciona proveedor
+  // Cargar reservas pendientes según tipo
   useEffect(() => {
-    if (f.tipo !== "pago_proveedor" || !f.proveedor_id) { setReservasPendientes([]); setReservaSel(null); return; }
-    supabase.from("reservas")
-      .select("id,codigo,pasajero_nombre,destino,moneda,neto,saldo_pendiente,fecha_in")
-      .eq("proveedor_id", parseInt(f.proveedor_id))
-      .not("saldo_pendiente", "is", null)
-      .gt("saldo_pendiente", 0)
-      .not("estado", "in", "(Cancelada,Cerrada)")
-      .order("fecha_in")
-      .then(({ data }) => setReservasPendientes(data || []));
+    if (f.tipo === "pago_proveedor" && f.proveedor_id) {
+      supabase.from("reservas")
+        .select("id,codigo,pasajero_nombre,destino,moneda,neto,saldo_pendiente,fecha_in")
+        .eq("proveedor_id", parseInt(f.proveedor_id))
+        .not("saldo_pendiente", "is", null)
+        .gt("saldo_pendiente", 0)
+        .not("estado", "in", "(Cancelada,Cerrada)")
+        .order("fecha_in")
+        .then(({ data }) => setReservasPendientes(data || []));
+    } else if (f.tipo === "cobro_cliente") {
+      // Cargar reservas activas con cobro pendiente
+      supabase.from("reservas")
+        .select("id,codigo,pasajero_nombre,destino,moneda,neto,venta,fecha_in,estado")
+        .not("estado", "in", "(Cancelada,Cerrada,Pagada)")
+        .not("venta", "is", null)
+        .order("fecha_in")
+        .then(async ({ data: reservasList }) => {
+          if (!reservasList) return setReservasPendientes([]);
+          // Para cada reserva, calcular cuánto se cobró ya
+          const { data: movs } = await supabase.from("movimientos")
+            .select("reserva_cod,monto_origen,moneda_origen,tc")
+            .eq("tipo", "cobro_cliente");
+          const cobradoPorReserva = {};
+          (movs || []).forEach(m => {
+            if (!m.reserva_cod) return;
+            cobradoPorReserva[m.reserva_cod] = (cobradoPorReserva[m.reserva_cod] || 0) + (m.monto_origen || 0);
+          });
+          const conPendiente = reservasList.map(r => ({
+            ...r,
+            cobrado: cobradoPorReserva[r.codigo] || 0,
+            pendiente_cobro: Math.max(0, (r.venta || 0) - (cobradoPorReserva[r.codigo] || 0)),
+          })).filter(r => r.pendiente_cobro > 0);
+          setReservasPendientes(conPendiente);
+        });
+    } else {
+      setReservasPendientes([]);
+      setReservaSel(null);
+    }
   }, [f.proveedor_id, f.tipo]);
 
-  // Al seleccionar reserva, autocompletar moneda y concepto
   function selReserva(r) {
     setReservaSel(r);
-    set("moneda_origen", r.moneda);
-    set("monto_origen", String(r.saldo_pendiente));
-    set("reserva_cod", r.codigo);
-    set("concepto", "Pago a " + (provSel?.nombre || "") + " — " + r.codigo + " · " + r.pasajero_nombre);
+    if (f.tipo === "pago_proveedor") {
+      set("moneda_origen", r.moneda);
+      set("monto_origen", String(r.saldo_pendiente));
+      set("reserva_cod", r.codigo);
+      set("concepto", "Pago a " + (provSel?.nombre || "") + " — " + r.codigo + " · " + r.pasajero_nombre);
+    } else if (f.tipo === "cobro_cliente") {
+      set("moneda_origen", r.moneda);
+      set("monto_origen", String(r.pendiente_cobro));
+      set("reserva_cod", r.codigo);
+      set("cliente_nombre", r.pasajero_nombre);
+      set("concepto", "Cobro — " + r.codigo + " · " + r.pasajero_nombre + " · " + r.destino);
+    }
   }
 
   // Calcular monto en moneda de la reserva para mostrar al usuario
@@ -987,7 +1023,29 @@ function ModalMovimiento({ proveedores, cuentasBancarias, user, onSave, onClose 
 
         {/* COBRO A CLIENTE */}
         {f.tipo === "cobro_cliente" && (
-          <div style={S.fg}><label style={S.fl}>Cliente</label><input style={S.inp} value={f.cliente_nombre} onChange={e => set("cliente_nombre", e.target.value)} /></div>
+          <div>
+            <div style={S.fg}><label style={S.fl}>Cliente (nombre libre)</label><input style={S.inp} value={f.cliente_nombre} onChange={e => set("cliente_nombre", e.target.value)} placeholder="O seleccioná una reserva abajo..." /></div>
+            {reservasPendientes.length > 0 && (
+              <div style={{ marginBottom: 14 }}>
+                <label style={S.fl}>Reservas con cobro pendiente</label>
+                <div style={{ maxHeight: 200, overflowY: "auto", border: "1px solid #1e3a5f", borderRadius: 8 }}>
+                  {reservasPendientes.map(r => (
+                    <div key={r.id} onClick={() => selReserva(r)} style={{ padding: "10px 14px", cursor: "pointer", borderBottom: "1px solid #0f2040", background: reservaSel?.id === r.id ? "#1e3a5f" : "transparent", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                      <div>
+                        <span style={{ fontFamily: "monospace", fontSize: 11, color: "#c9a84c" }}>{r.codigo}</span>
+                        <span style={{ fontSize: 12, marginLeft: 8 }}>{r.pasajero_nombre}</span>
+                        <div style={{ fontSize: 10, color: "#7a9cc8" }}>{r.destino} · {fmtD(r.fecha_in)}</div>
+                      </div>
+                      <div style={{ textAlign: "right" }}>
+                        <div style={{ fontSize: 12, fontWeight: 700, color: "#10b981" }}>{fmt(r.pendiente_cobro, r.moneda)}</div>
+                        <div style={{ fontSize: 9, color: "#4a6fa5" }}>de {fmt(r.venta, r.moneda)} · cobrado {fmt(r.cobrado, r.moneda)}</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
         )}
 
         {/* MONTO Y CUENTA */}
@@ -1046,22 +1104,134 @@ function Finanzas({ cuentasBancarias, proveedores, user }) {
   const [loading, setLoading] = useState(true);
   const [subPage, setSubPage] = useState("resumen");
   const [modalNuevo, setModalNuevo] = useState(false);
-  const cargar = useCallback(async () => { setLoading(true); const { data } = await supabase.from("movimientos").select("*").order("fecha", { ascending: false }).limit(100); setMovimientos(data || []); setLoading(false); }, []);
+  const [cobrosPendientes, setCobros] = useState([]);
+  const [deudasPendientes, setDeudas] = useState([]);
+
+  const cargar = useCallback(async () => {
+    setLoading(true);
+    const [{ data: movs }, { data: reservas }, { data: movsCobros }] = await Promise.all([
+      supabase.from("movimientos").select("*").order("fecha", { ascending: false }).limit(100),
+      supabase.from("reservas").select("id,codigo,tipo,pasajero_nombre,destino,moneda,venta,neto,saldo_pendiente,proveedor_nombre,fecha_in,estado").not("estado", "in", "(Cancelada,Cerrada)"),
+      supabase.from("movimientos").select("reserva_cod,monto_origen,moneda_origen,tc").eq("tipo", "cobro_cliente"),
+    ]);
+    setMovimientos(movs || []);
+
+    // Calcular cobros pendientes
+    const cobradoPorRes = {};
+    (movsCobros || []).forEach(m => {
+      if (m.reserva_cod) cobradoPorRes[m.reserva_cod] = (cobradoPorRes[m.reserva_cod] || 0) + (m.monto_origen || 0);
+    });
+    const cobros = (reservas || []).map(r => ({
+      ...r,
+      cobrado: cobradoPorRes[r.codigo] || 0,
+      pendiente: Math.max(0, (r.venta || 0) - (cobradoPorRes[r.codigo] || 0)),
+    })).filter(r => r.pendiente > 0);
+    setCobros(cobros);
+
+    // Deudas pendientes = reservas con saldo_pendiente > 0
+    const deudas = (reservas || []).filter(r => (r.saldo_pendiente || 0) > 0);
+    setDeudas(deudas);
+
+    setLoading(false);
+  }, []);
+
   useEffect(() => { cargar(); }, [cargar]);
+
   const totalUSD = cuentasBancarias.filter(c => c.moneda === "USD").reduce((s, c) => s + (c.saldo || 0), 0);
   const totalARS = cuentasBancarias.filter(c => c.moneda === "ARS").reduce((s, c) => s + (c.saldo || 0), 0);
+  const totalCobrar = cobrosPendientes.filter(r => r.moneda === "USD").reduce((s, r) => s + r.pendiente, 0);
+  const totalDeber = deudasPendientes.filter(r => r.moneda === "USD").reduce((s, r) => s + (r.saldo_pendiente || 0), 0);
+
+  const TABS = ["resumen", "cobros", "deudas", "movimientos", "bancos"];
+  const TABS_LABEL = { resumen: "Resumen", cobros: "💚 A cobrar", deudas: "🔴 A pagar", movimientos: "Movimientos", bancos: "Bancos" };
+
   return (
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
         <div style={S.pt}>Finanzas</div>
         <button style={btnS("pri")} onClick={() => setModalNuevo(true)}>+ Movimiento</button>
       </div>
-      <div style={{ display: "flex", gap: 2, marginBottom: 20, background: "#080f1a", borderRadius: 8, padding: 4 }}>
-        {["resumen", "movimientos", "bancos"].map(s => <button key={s} style={{ ...btnS(subPage === s ? "secondary" : "ghost", "sm"), flex: 1, justifyContent: "center" }} onClick={() => setSubPage(s)}>{s.charAt(0).toUpperCase() + s.slice(1)}</button>)}
+      <div style={{ display: "flex", gap: 2, marginBottom: 20, background: "#080f1a", borderRadius: 8, padding: 4, flexWrap: "wrap" }}>
+        {TABS.map(s => <button key={s} style={{ ...btnS(subPage === s ? "secondary" : "ghost", "sm"), flex: 1, justifyContent: "center", minWidth: 80 }} onClick={() => setSubPage(s)}>{TABS_LABEL[s]}</button>)}
       </div>
-      {subPage === "resumen" && <div><div style={{ display: "flex", gap: 14, marginBottom: 20, flexWrap: "wrap" }}><Stat label="Posición USD" value={fmt(totalUSD, "USD")} color={totalUSD >= 0 ? "#10b981" : "#ef4444"} /><Stat label="Posición ARS" value={fmt(totalARS, "ARS")} color={totalARS >= 0 ? "#10b981" : "#ef4444"} /></div><div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}><div style={S.card}><div style={S.stitle}>🏦 Cuentas propias</div>{cuentasBancarias.map(c => <div key={c.id} style={{ display: "flex", justifyContent: "space-between", padding: "8px 10px", background: "#080f1a", borderRadius: 6, marginBottom: 5 }}><div><div style={{ fontSize: 12, fontWeight: 500 }}>{c.nombre}</div><div style={{ fontSize: 10, color: "#4a6fa5" }}>{c.tipo} · {c.moneda}</div></div><span style={{ fontWeight: 700, fontSize: 12, color: (c.saldo || 0) >= 0 ? "#10b981" : "#ef4444" }}>{fmt(c.saldo || 0, c.moneda)}</span></div>)}</div><div style={S.card}><div style={S.stitle}>🏢 Proveedores</div>{proveedores.map(p => <div key={p.id} style={{ marginBottom: 10 }}><div style={{ fontSize: 11, fontWeight: 600, color: "#7a9cc8", marginBottom: 4 }}>{p.nombre}</div>{(p.cuentas_proveedor || []).map(c => <div key={c.id} style={{ display: "flex", justifyContent: "space-between", padding: "5px 10px", background: "#080f1a", borderRadius: 5, marginBottom: 3 }}><span style={{ fontSize: 11, color: "#4a6fa5" }}>{c.nombre}</span><span style={{ fontWeight: 700, fontSize: 11, color: (c.saldo || 0) >= 0 ? "#10b981" : "#ef4444" }}>{fmt(c.saldo || 0, c.moneda)}</span></div>)}</div>)}</div></div></div>}
-      {subPage === "movimientos" && (loading ? <Spinner /> : <Tabla cols={["Fecha", "Tipo", "Concepto", "Monto", "Reserva"]} rows={movimientos.map(m => { const esCobro = m.tipo === "cobro_cliente" || m.tipo === "ingreso"; return <tr key={m.id}><td style={{ ...S.td, fontSize: 11, color: "#7a9cc8" }}>{fmtD(m.fecha)}</td><td style={S.td}><span style={{ fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 10, background: "#1e2a3a", color: MOV_C[m.tipo] || "#94a3b8" }}>{TIPOS_MOV[m.tipo]}</span></td><td style={{ ...S.td, fontSize: 11, maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.concepto}</td><td style={{ ...S.td, fontWeight: 700, color: esCobro ? "#10b981" : "#ef4444" }}>{esCobro ? "+" : "-"}{fmt(m.monto_origen, m.moneda_origen)}</td><td style={{ ...S.td, fontSize: 11, color: "#c9a84c", fontFamily: "monospace" }}>{m.reserva_cod || "—"}</td></tr>; })} />)}
+
+      {subPage === "resumen" && (
+        <div>
+          <div style={{ display: "flex", gap: 14, marginBottom: 20, flexWrap: "wrap" }}>
+            <Stat label="Posición USD" value={fmt(totalUSD, "USD")} color={totalUSD >= 0 ? "#10b981" : "#ef4444"} />
+            <Stat label="Posición ARS" value={fmt(totalARS, "ARS")} color={totalARS >= 0 ? "#10b981" : "#ef4444"} />
+            <Stat label="A cobrar (USD)" value={fmt(totalCobrar, "USD")} color="#10b981" />
+            <Stat label="A pagar (USD)" value={fmt(totalDeber, "USD")} color="#ef4444" />
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+            <div style={S.card}>
+              <div style={S.stitle}>🏦 Cuentas propias</div>
+              {cuentasBancarias.map(c => <div key={c.id} style={{ display: "flex", justifyContent: "space-between", padding: "8px 10px", background: "#080f1a", borderRadius: 6, marginBottom: 5 }}><div><div style={{ fontSize: 12, fontWeight: 500 }}>{c.nombre}</div><div style={{ fontSize: 10, color: "#4a6fa5" }}>{c.tipo} · {c.moneda}</div></div><span style={{ fontWeight: 700, fontSize: 12, color: (c.saldo || 0) >= 0 ? "#10b981" : "#ef4444" }}>{fmt(c.saldo || 0, c.moneda)}</span></div>)}
+            </div>
+            <div style={S.card}>
+              <div style={S.stitle}>🏢 Proveedores</div>
+              {proveedores.map(p => <div key={p.id} style={{ marginBottom: 10 }}><div style={{ fontSize: 11, fontWeight: 600, color: "#7a9cc8", marginBottom: 4 }}>{p.nombre}</div>{(p.cuentas_proveedor || []).map(c => <div key={c.id} style={{ display: "flex", justifyContent: "space-between", padding: "5px 10px", background: "#080f1a", borderRadius: 5, marginBottom: 3 }}><span style={{ fontSize: 11, color: "#4a6fa5" }}>{c.nombre}</span><span style={{ fontWeight: 700, fontSize: 11, color: (c.saldo || 0) >= 0 ? "#10b981" : "#ef4444" }}>{fmt(c.saldo || 0, c.moneda)}</span></div>)}</div>)}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {subPage === "cobros" && (
+        <div>
+          <div style={{ display: "flex", gap: 14, marginBottom: 20 }}>
+            <Stat label="Total a cobrar USD" value={fmt(totalCobrar, "USD")} color="#10b981" />
+            <Stat label="Reservas pendientes" value={cobrosPendientes.length} color="#c9a84c" />
+          </div>
+          {loading ? <Spinner /> : cobrosPendientes.length === 0
+            ? <div style={{ ...S.card, textAlign: "center", padding: 40, color: "#10b981" }}>✅ Sin cobros pendientes</div>
+            : <Tabla
+                cols={["Código", "Pasajero", "Destino", "Venta", "Cobrado", "Pendiente", "Fecha viaje"]}
+                rows={cobrosPendientes.sort((a, b) => (a.fecha_in || "").localeCompare(b.fecha_in || "")).map(r => (
+                  <tr key={r.id}>
+                    <td style={{ ...S.td, fontFamily: "monospace", color: "#c9a84c", fontSize: 11 }}>{r.codigo}</td>
+                    <td style={S.td}><div style={{ fontWeight: 500 }}>{r.pasajero_nombre}</div><div style={{ fontSize: 10, color: "#4a6fa5" }}>{r.tipo}</div></td>
+                    <td style={S.td}>{r.destino}</td>
+                    <td style={S.td}>{fmt(r.venta, r.moneda)}</td>
+                    <td style={{ ...S.td, color: "#10b981" }}>{fmt(r.cobrado, r.moneda)}</td>
+                    <td style={{ ...S.td, fontWeight: 700, color: "#f59e0b" }}>{fmt(r.pendiente, r.moneda)}</td>
+                    <td style={{ ...S.td, fontSize: 11, color: "#7a9cc8" }}>{fmtD(r.fecha_in)}</td>
+                  </tr>
+                ))}
+              />
+          }
+        </div>
+      )}
+
+      {subPage === "deudas" && (
+        <div>
+          <div style={{ display: "flex", gap: 14, marginBottom: 20 }}>
+            <Stat label="Total a pagar USD" value={fmt(totalDeber, "USD")} color="#ef4444" />
+            <Stat label="Reservas con deuda" value={deudasPendientes.length} color="#c9a84c" />
+          </div>
+          {loading ? <Spinner /> : deudasPendientes.length === 0
+            ? <div style={{ ...S.card, textAlign: "center", padding: 40, color: "#10b981" }}>✅ Sin deudas pendientes</div>
+            : <Tabla
+                cols={["Código", "Pasajero", "Proveedor", "Neto", "Pendiente", "Fecha viaje", "Estado"]}
+                rows={deudasPendientes.sort((a, b) => (a.fecha_in || "").localeCompare(b.fecha_in || "")).map(r => (
+                  <tr key={r.id}>
+                    <td style={{ ...S.td, fontFamily: "monospace", color: "#c9a84c", fontSize: 11 }}>{r.codigo}</td>
+                    <td style={S.td}>{r.pasajero_nombre}</td>
+                    <td style={S.td}><div style={{ fontWeight: 500 }}>{r.proveedor_nombre}</div><div style={{ fontSize: 10, color: "#4a6fa5" }}>{r.tipo}</div></td>
+                    <td style={S.td}>{fmt(r.neto, r.moneda)}</td>
+                    <td style={{ ...S.td, fontWeight: 700, color: "#ef4444" }}>{fmt(r.saldo_pendiente, r.moneda)}</td>
+                    <td style={{ ...S.td, fontSize: 11, color: "#7a9cc8" }}>{fmtD(r.fecha_in)}</td>
+                    <td style={S.td}><Badge estado={r.estado} /></td>
+                  </tr>
+                ))}
+              />
+          }
+        </div>
+      )}
+
+      {subPage === "movimientos" && (loading ? <Spinner /> : <Tabla cols={["Fecha", "Tipo", "Concepto", "Monto", "Reserva"]} rows={movimientos.map(m => { const esCobro = m.tipo === "cobro_cliente" || m.tipo === "ingreso"; return <tr key={m.id}><td style={{ ...S.td, fontSize: 11, color: "#7a9cc8" }}>{fmtD(m.fecha)}</td><td style={S.td}><span style={{ fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 10, background: "#1e2a3a", color: MOV_C[m.tipo] || "#94a3b8" }}>{TIPOS_MOV[m.tipo] || m.tipo}</span></td><td style={{ ...S.td, fontSize: 11, maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.concepto}</td><td style={{ ...S.td, fontWeight: 700, color: esCobro ? "#10b981" : "#ef4444" }}>{esCobro ? "+" : "-"}{fmt(m.monto_origen, m.moneda_origen)}</td><td style={{ ...S.td, fontSize: 11, color: "#c9a84c", fontFamily: "monospace" }}>{m.reserva_cod || "—"}</td></tr>; })} />)}
+
       {subPage === "bancos" && <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(240px,1fr))", gap: 14 }}>{cuentasBancarias.map(c => <div key={c.id} style={{ ...S.card, borderColor: (c.saldo || 0) < 0 ? "#ef444433" : "#1e3a5f" }}><div style={{ fontWeight: 700, fontSize: 14, marginBottom: 2 }}>{c.nombre}</div><div style={{ fontSize: 10, color: "#4a6fa5", marginBottom: 10, textTransform: "capitalize" }}>{c.tipo} · {c.moneda}</div><div style={{ fontSize: 22, fontWeight: 800, color: (c.saldo || 0) >= 0 ? "#10b981" : "#ef4444" }}>{fmt(c.saldo || 0, c.moneda)}</div></div>)}</div>}
+
       {modalNuevo && <ModalMovimiento proveedores={proveedores} cuentasBancarias={cuentasBancarias} user={user} onSave={() => { setModalNuevo(false); cargar(); }} onClose={() => setModalNuevo(false)} />}
     </div>
   );
