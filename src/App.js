@@ -210,10 +210,60 @@ function ModalReserva({ reserva, proveedores, clientes, user, onSave, onClose })
       const { count } = await supabase.from("reservas").select("*", { count: "exact", head: true });
       codigo = "LT-" + new Date().getFullYear() + "-" + String((count || 0) + 1).padStart(3, "0");
     }
-    const payload = { codigo, estado: f.estado, tipo: f.tipo, destino: f.destino, cliente_id: f.cliente_id || null, pasajero_nombre: f.pasajero_nombre, pasajero_mail: f.pasajero_mail, pasajero_tel: f.pasajero_tel, fecha_in: f.fecha_in || null, fecha_out: f.fecha_out || null, vto_pago: f.vto_pago || null, vto_cobro: f.vto_cobro || null, vto_reserva: f.vto_reserva || null, proveedor_id: f.proveedor_id ? parseInt(f.proveedor_id) : null, proveedor_nombre: provSel?.nombre || f.proveedor_nombre || "", cuenta_proveedor_id: f.cuenta_proveedor_id || null, habitacion: f.habitacion, adultos: parseInt(f.adultos) || 1, chd: parseInt(f.chd) || 0, inf: parseInt(f.inf) || 0, moneda: f.moneda, neto: f.neto ? parseFloat(f.neto) : null, venta: f.venta ? parseFloat(f.venta) : null, seguro_compania: f.seguro_compania, seguro_poliza: f.seguro_poliza, seguro_desde: f.seguro_desde || null, seguro_hasta: f.seguro_hasta || null, vendedor: f.vendedor, vendedor_id: user?.id || null, notas: f.notas, created_by: user?.id || null };
-    let error;
-    if (esNueva) { ({ error } = await supabase.from("reservas").insert([payload])); }
-    else { ({ error } = await supabase.from("reservas").update(payload).eq("id", reserva.id)); }
+    const neto = f.neto ? parseFloat(f.neto) : null;
+    const netoAnterior = reserva?.neto ? parseFloat(reserva.neto) : null;
+    const netoChanged = neto !== netoAnterior;
+    const payload = {
+      codigo, estado: f.estado, tipo: f.tipo, destino: f.destino,
+      cliente_id: f.cliente_id || null, pasajero_nombre: f.pasajero_nombre,
+      pasajero_mail: f.pasajero_mail, pasajero_tel: f.pasajero_tel,
+      fecha_in: f.fecha_in || null, fecha_out: f.fecha_out || null,
+      vto_pago: f.vto_pago || null, vto_cobro: f.vto_cobro || null, vto_reserva: f.vto_reserva || null,
+      proveedor_id: f.proveedor_id ? parseInt(f.proveedor_id) : null,
+      proveedor_nombre: provSel?.nombre || f.proveedor_nombre || "",
+      cuenta_proveedor_id: f.cuenta_proveedor_id || null,
+      habitacion: f.habitacion, adultos: parseInt(f.adultos) || 1,
+      chd: parseInt(f.chd) || 0, inf: parseInt(f.inf) || 0,
+      moneda: f.moneda, neto, venta: f.venta ? parseFloat(f.venta) : null,
+      seguro_compania: f.seguro_compania, seguro_poliza: f.seguro_poliza,
+      seguro_desde: f.seguro_desde || null, seguro_hasta: f.seguro_hasta || null,
+      vendedor: f.vendedor, vendedor_id: user?.id || null, notas: f.notas,
+      created_by: user?.id || null,
+    };
+
+    let error, data;
+    if (esNueva) {
+      // saldo_pendiente = neto al crear
+      payload.saldo_pendiente = neto || 0;
+      ({ error, data } = await supabase.from("reservas").insert([payload]).select().single());
+      // Registrar deuda automática en movimientos
+      if (!error && neto && f.proveedor_id) {
+        await supabase.from("movimientos").insert([{
+          tipo: "deuda_proveedor",
+          fecha: hoy(),
+          monto_origen: neto,
+          moneda_origen: f.moneda,
+          proveedor_id: parseInt(f.proveedor_id),
+          cuenta_proveedor_id: f.cuenta_proveedor_id || null,
+          concepto: "Deuda generada — " + codigo + " · " + f.pasajero_nombre,
+          reserva_cod: codigo,
+          usuario_id: user?.id || null,
+        }]);
+        // Actualizar saldo del proveedor (restar neto)
+        if (f.cuenta_proveedor_id) {
+          const { data: cp } = await supabase.from("cuentas_proveedor").select("saldo").eq("id", f.cuenta_proveedor_id).single();
+          if (cp) await supabase.from("cuentas_proveedor").update({ saldo: (cp.saldo || 0) - neto }).eq("id", f.cuenta_proveedor_id);
+        }
+      }
+    } else {
+      // Si cambió el neto, ajustar saldo_pendiente
+      if (netoChanged && neto !== null) {
+        const pagado = (netoAnterior || 0) - (reserva.saldo_pendiente || 0);
+        payload.saldo_pendiente = Math.max(0, neto - pagado);
+      }
+      ({ error } = await supabase.from("reservas").update(payload).eq("id", reserva.id));
+    }
+
     setSaving(false);
     if (error) { alert("Error al guardar: " + error.message); return; }
     onSave();
@@ -549,37 +599,206 @@ function Proveedores({ proveedores }) {
 function ModalMovimiento({ proveedores, cuentasBancarias, user, onSave, onClose }) {
   const [f, setF] = useState({ tipo: "cobro_cliente", fecha: hoy(), desde_cuenta_id: "", monto_origen: "", moneda_origen: "USD", tc: "1", proveedor_id: "", cuenta_proveedor_id: "", cliente_nombre: "", concepto: "", reserva_cod: "" });
   const [saving, setSaving] = useState(false);
+  const [reservasPendientes, setReservasPendientes] = useState([]);
+  const [reservaSel, setReservaSel] = useState(null);
   const set = (k, v) => setF(x => ({ ...x, [k]: v }));
   const provSel = proveedores.find(p => String(p.id) === String(f.proveedor_id));
+
+  // Cargar reservas pendientes cuando se selecciona proveedor
+  useEffect(() => {
+    if (f.tipo !== "pago_proveedor" || !f.proveedor_id) { setReservasPendientes([]); setReservaSel(null); return; }
+    supabase.from("reservas")
+      .select("id,codigo,pasajero_nombre,destino,moneda,neto,saldo_pendiente,fecha_in")
+      .eq("proveedor_id", parseInt(f.proveedor_id))
+      .not("saldo_pendiente", "is", null)
+      .gt("saldo_pendiente", 0)
+      .not("estado", "in", "(Cancelada,Cerrada)")
+      .order("fecha_in")
+      .then(({ data }) => setReservasPendientes(data || []));
+  }, [f.proveedor_id, f.tipo]);
+
+  // Al seleccionar reserva, autocompletar moneda y concepto
+  function selReserva(r) {
+    setReservaSel(r);
+    set("moneda_origen", r.moneda);
+    set("monto_origen", String(r.saldo_pendiente));
+    set("reserva_cod", r.codigo);
+    set("concepto", "Pago a " + (provSel?.nombre || "") + " — " + r.codigo + " · " + r.pasajero_nombre);
+  }
+
+  // Calcular monto en moneda de la reserva para mostrar al usuario
+  const montoEnMonedaReserva = () => {
+    if (!f.monto_origen || !reservaSel) return null;
+    const monto = parseFloat(f.monto_origen);
+    const tc = parseFloat(f.tc) || 1;
+    if (f.moneda_origen === reservaSel.moneda) return monto;
+    // Si pago en ARS y reserva en USD: divido por TC
+    if (f.moneda_origen === "ARS" && reservaSel.moneda === "USD") return monto / tc;
+    // Si pago en USD y reserva en ARS: multiplico por TC
+    if (f.moneda_origen === "USD" && reservaSel.moneda === "ARS") return monto * tc;
+    return monto / tc;
+  };
+
   async function guardar() {
     if (!f.concepto || !f.monto_origen) { alert("Completá concepto y monto"); return; }
     setSaving(true);
-    const { error } = await supabase.from("movimientos").insert([{ tipo: f.tipo, fecha: f.fecha, desde_cuenta_id: f.desde_cuenta_id || null, monto_origen: parseFloat(f.monto_origen), moneda_origen: f.moneda_origen, tc: parseFloat(f.tc) || 1, proveedor_id: f.proveedor_id ? parseInt(f.proveedor_id) : null, cuenta_proveedor_id: f.cuenta_proveedor_id || null, cliente_nombre: f.cliente_nombre, concepto: f.concepto, reserva_cod: f.reserva_cod, usuario_id: user?.id || null }]);
+
+    // Insertar movimiento
+    const { error } = await supabase.from("movimientos").insert([{
+      tipo: f.tipo, fecha: f.fecha,
+      desde_cuenta_id: f.desde_cuenta_id || null,
+      monto_origen: parseFloat(f.monto_origen),
+      moneda_origen: f.moneda_origen,
+      tc: parseFloat(f.tc) || 1,
+      proveedor_id: f.proveedor_id ? parseInt(f.proveedor_id) : null,
+      cuenta_proveedor_id: f.cuenta_proveedor_id || null,
+      cliente_nombre: f.cliente_nombre,
+      concepto: f.concepto,
+      reserva_cod: f.reserva_cod,
+      usuario_id: user?.id || null,
+    }]);
+
+    if (error) { setSaving(false); alert("Error: " + error.message); return; }
+
+    // Si es pago a proveedor con reserva seleccionada
+    if (f.tipo === "pago_proveedor" && reservaSel) {
+      const montoDesc = montoEnMonedaReserva() || parseFloat(f.monto_origen);
+      const nuevoSaldo = Math.max(0, (reservaSel.saldo_pendiente || 0) - montoDesc);
+      const nuevoEstado = nuevoSaldo <= 0 ? "Pagada" : null;
+
+      const upd = { saldo_pendiente: nuevoSaldo };
+      if (nuevoEstado) upd.estado = nuevoEstado;
+      await supabase.from("reservas").update(upd).eq("id", reservaSel.id);
+
+      // Actualizar saldo cuenta proveedor
+      if (f.cuenta_proveedor_id) {
+        const { data: cp } = await supabase.from("cuentas_proveedor").select("saldo").eq("id", f.cuenta_proveedor_id).single();
+        if (cp) await supabase.from("cuentas_proveedor").update({ saldo: (cp.saldo || 0) + montoDesc }).eq("id", f.cuenta_proveedor_id);
+      }
+    }
+
+    // Actualizar saldo cuenta bancaria
+    if (f.desde_cuenta_id) {
+      const { data: cb } = await supabase.from("cuentas_bancarias").select("saldo").eq("id", f.desde_cuenta_id).single();
+      if (cb) {
+        const esCobro = f.tipo === "cobro_cliente" || f.tipo === "ingreso";
+        const delta = esCobro ? parseFloat(f.monto_origen) : -parseFloat(f.monto_origen);
+        await supabase.from("cuentas_bancarias").update({ saldo: (cb.saldo || 0) + delta }).eq("id", f.desde_cuenta_id);
+      }
+    }
+
     setSaving(false);
-    if (error) { alert("Error: " + error.message); return; }
     onSave();
   }
+
   return (
     <div style={S.modal} onClick={onClose}>
-      <div style={mbox(600)} onClick={e => e.stopPropagation()}>
+      <div style={mbox(640)} onClick={e => e.stopPropagation()}>
         <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 18 }}>
           <div style={{ fontWeight: 700, fontSize: 16 }}>Nuevo movimiento</div>
           <button style={btnS("ghost", "sm")} onClick={onClose}>✕</button>
         </div>
+
         <div style={S.g2}>
-          <div style={S.fg}><label style={S.fl}>Tipo</label><select style={S.sel} value={f.tipo} onChange={e => set("tipo", e.target.value)}>{Object.entries(TIPOS_MOV).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></div>
+          <div style={S.fg}><label style={S.fl}>Tipo</label>
+            <select style={S.sel} value={f.tipo} onChange={e => { set("tipo", e.target.value); setReservaSel(null); }}>
+              {Object.entries(TIPOS_MOV).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+            </select>
+          </div>
           <div style={S.fg}><label style={S.fl}>Fecha</label><input style={S.inp} type="date" value={f.fecha} onChange={e => set("fecha", e.target.value)} /></div>
         </div>
-        {f.tipo === "pago_proveedor" && <div style={S.g2}><div style={S.fg}><label style={S.fl}>Proveedor</label><select style={S.sel} value={f.proveedor_id} onChange={e => { set("proveedor_id", e.target.value); set("cuenta_proveedor_id", ""); }}><option value="">Seleccionar...</option>{proveedores.map(p => <option key={p.id} value={p.id}>{p.nombre}</option>)}</select></div><div style={S.fg}><label style={S.fl}>Cuenta proveedor</label><select style={S.sel} value={f.cuenta_proveedor_id} onChange={e => set("cuenta_proveedor_id", e.target.value)}><option value="">Seleccionar...</option>{(provSel?.cuentas_proveedor || []).map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}</select></div></div>}
-        {f.tipo === "cobro_cliente" && <div style={S.fg}><label style={S.fl}>Cliente</label><input style={S.inp} value={f.cliente_nombre} onChange={e => set("cliente_nombre", e.target.value)} /></div>}
+
+        {/* PAGO A PROVEEDOR */}
+        {f.tipo === "pago_proveedor" && (
+          <div>
+            <div style={S.g2}>
+              <div style={S.fg}><label style={S.fl}>Proveedor</label>
+                <select style={S.sel} value={f.proveedor_id} onChange={e => { set("proveedor_id", e.target.value); set("cuenta_proveedor_id", ""); setReservaSel(null); }}>
+                  <option value="">Seleccionar...</option>
+                  {proveedores.map(p => <option key={p.id} value={p.id}>{p.nombre}</option>)}
+                </select>
+              </div>
+              <div style={S.fg}><label style={S.fl}>Cuenta proveedor</label>
+                <select style={S.sel} value={f.cuenta_proveedor_id} onChange={e => set("cuenta_proveedor_id", e.target.value)}>
+                  <option value="">Seleccionar...</option>
+                  {(provSel?.cuentas_proveedor || []).map(c => <option key={c.id} value={c.id}>{c.nombre} ({c.moneda})</option>)}
+                </select>
+              </div>
+            </div>
+
+            {/* RESERVAS PENDIENTES */}
+            {reservasPendientes.length > 0 && (
+              <div style={{ marginBottom: 14 }}>
+                <label style={S.fl}>Reservas pendientes de pago</label>
+                <div style={{ maxHeight: 200, overflowY: "auto", border: "1px solid #1e3a5f", borderRadius: 8 }}>
+                  {reservasPendientes.map(r => (
+                    <div key={r.id} onClick={() => selReserva(r)} style={{ padding: "10px 14px", cursor: "pointer", borderBottom: "1px solid #0f2040", background: reservaSel?.id === r.id ? "#1e3a5f" : "transparent", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                      <div>
+                        <span style={{ fontFamily: "monospace", fontSize: 11, color: "#c9a84c" }}>{r.codigo}</span>
+                        <span style={{ fontSize: 12, marginLeft: 8 }}>{r.pasajero_nombre}</span>
+                        <div style={{ fontSize: 10, color: "#7a9cc8" }}>{r.destino} · {fmtD(r.fecha_in)}</div>
+                      </div>
+                      <div style={{ textAlign: "right" }}>
+                        <div style={{ fontSize: 12, fontWeight: 700, color: "#ef4444" }}>{fmt(r.saldo_pendiente, r.moneda)}</div>
+                        {r.saldo_pendiente < r.neto && <div style={{ fontSize: 9, color: "#4a6fa5" }}>de {fmt(r.neto, r.moneda)}</div>}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            {f.proveedor_id && reservasPendientes.length === 0 && (
+              <div style={{ fontSize: 11, color: "#10b981", marginBottom: 14 }}>✅ Sin deudas pendientes con este proveedor</div>
+            )}
+          </div>
+        )}
+
+        {/* COBRO A CLIENTE */}
+        {f.tipo === "cobro_cliente" && (
+          <div style={S.fg}><label style={S.fl}>Cliente</label><input style={S.inp} value={f.cliente_nombre} onChange={e => set("cliente_nombre", e.target.value)} /></div>
+        )}
+
+        {/* MONTO Y CUENTA */}
         <div style={S.g2}>
-          <div style={S.fg}><label style={S.fl}>Cuenta</label><select style={S.sel} value={f.desde_cuenta_id} onChange={e => set("desde_cuenta_id", e.target.value)}><option value="">Seleccionar...</option>{cuentasBancarias.map(c => <option key={c.id} value={c.id}>{c.nombre} ({c.moneda})</option>)}</select></div>
-          <div style={S.fg}><label style={S.fl}>Monto</label><input style={S.inp} type="number" value={f.monto_origen} onChange={e => set("monto_origen", e.target.value)} placeholder="0.00" /></div>
-          <div style={S.fg}><label style={S.fl}>Moneda</label><select style={S.sel} value={f.moneda_origen} onChange={e => set("moneda_origen", e.target.value)}><option>USD</option><option>ARS</option><option>EUR</option></select></div>
-          <div style={S.fg}><label style={S.fl}>TC</label><input style={S.inp} type="number" value={f.tc} onChange={e => set("tc", e.target.value)} /></div>
+          <div style={S.fg}><label style={S.fl}>Cuenta bancaria</label>
+            <select style={S.sel} value={f.desde_cuenta_id} onChange={e => set("desde_cuenta_id", e.target.value)}>
+              <option value="">Seleccionar...</option>
+              {cuentasBancarias.map(c => <option key={c.id} value={c.id}>{c.nombre} ({c.moneda})</option>)}
+            </select>
+          </div>
+          <div style={S.fg}><label style={S.fl}>Moneda del pago</label>
+            <select style={S.sel} value={f.moneda_origen} onChange={e => set("moneda_origen", e.target.value)}>
+              <option>USD</option><option>ARS</option><option>EUR</option>
+            </select>
+          </div>
+          <div style={S.fg}><label style={S.fl}>Monto</label>
+            <input style={S.inp} type="number" value={f.monto_origen} onChange={e => set("monto_origen", e.target.value)} placeholder="0.00" />
+          </div>
+          <div style={S.fg}><label style={S.fl}>Tipo de cambio</label>
+            <input style={S.inp} type="number" value={f.tc} onChange={e => set("tc", e.target.value)} />
+          </div>
         </div>
+
+        {/* Mostrar equivalente si hay conversión */}
+        {reservaSel && f.moneda_origen !== reservaSel.moneda && f.monto_origen && (
+          <div style={{ padding: "8px 12px", background: "#0a2d1e", borderRadius: 8, marginBottom: 14, fontSize: 11 }}>
+            💱 Equivale a <strong style={{ color: "#10b981" }}>{fmt(montoEnMonedaReserva(), reservaSel.moneda)}</strong> — descuenta de los <strong>{fmt(reservaSel.saldo_pendiente, reservaSel.moneda)}</strong> pendientes
+          </div>
+        )}
+
+        {/* Saldo que quedaría */}
+        {reservaSel && f.monto_origen && (
+          <div style={{ padding: "8px 12px", background: "#080f1a", borderRadius: 8, marginBottom: 14, fontSize: 11 }}>
+            Saldo pendiente tras el pago: <strong style={{ color: Math.max(0, (reservaSel.saldo_pendiente || 0) - (montoEnMonedaReserva() || 0)) <= 0 ? "#10b981" : "#f59e0b" }}>
+              {fmt(Math.max(0, (reservaSel.saldo_pendiente || 0) - (montoEnMonedaReserva() || parseFloat(f.monto_origen) || 0)), reservaSel.moneda)}
+            </strong>
+            {Math.max(0, (reservaSel.saldo_pendiente || 0) - (montoEnMonedaReserva() || 0)) <= 0 && <span style={{ color: "#10b981", marginLeft: 8 }}>→ Se marcará como Pagada ✅</span>}
+          </div>
+        )}
+
         <div style={S.fg}><label style={S.fl}>Concepto *</label><input style={S.inp} value={f.concepto} onChange={e => set("concepto", e.target.value)} /></div>
-        <div style={S.fg}><label style={S.fl}>Código de reserva (opcional)</label><input style={S.inp} value={f.reserva_cod} onChange={e => set("reserva_cod", e.target.value)} placeholder="LT-2026-XXX" /></div>
+        {f.tipo !== "pago_proveedor" && <div style={S.fg}><label style={S.fl}>Código de reserva (opcional)</label><input style={S.inp} value={f.reserva_cod} onChange={e => set("reserva_cod", e.target.value)} placeholder="LT-2026-XXX" /></div>}
+
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
           <button style={btnS("ghost")} onClick={onClose}>Cancelar</button>
           <button style={{ ...btnS("pri"), opacity: saving ? 0.7 : 1 }} onClick={guardar} disabled={saving}>{saving ? "Guardando..." : "✓ Registrar"}</button>
