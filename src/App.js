@@ -114,9 +114,19 @@ function Tabla({ cols, rows, empty = "Sin resultados" }) {
   return (
     <div style={{ ...S.card, padding: 0, overflowX: "auto" }}>
       <table style={{ width: "100%", borderCollapse: "collapse" }}>
-        <thead><tr>{cols.map(c => <th key={c.k || c} style={S.th}>{c.label || c}</th>)}</tr></thead>
+        <thead>
+          <tr>
+            {cols.map((c, i) => {
+              const key = typeof c === "string" ? c : (c.k || String(i));
+              const label = typeof c === "string" ? c : (c.label != null ? c.label : c.k || "");
+              return <th key={key} style={S.th}>{label}</th>;
+            })}
+          </tr>
+        </thead>
         <tbody>
-          {rows.length === 0 ? <tr><td colSpan={cols.length} style={{ ...S.td, textAlign: "center", color: "#4a6fa5", padding: 40 }}>{empty}</td></tr> : rows}
+          {rows.length === 0
+            ? <tr><td colSpan={cols.length} style={{ ...S.td, textAlign: "center", color: "#4a6fa5", padding: 40 }}>{empty}</td></tr>
+            : rows}
         </tbody>
       </table>
     </div>
