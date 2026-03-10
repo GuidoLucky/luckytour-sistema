@@ -207,6 +207,7 @@ const NAV = [
   { id: "clientes", icon: "👤", label: "Clientes" },
   { id: "proveedores", icon: "🏢", label: "Proveedores" },
   { id: "finanzas", icon: "💰", label: "Finanzas" },
+  { id: "vendedores", icon: "👥", label: "Vendedores" },
   { id: "alertas", icon: "🔔", label: "Alertas" },
   { id: "documentos", icon: "📄", label: "Documentos" },
 ];
@@ -361,6 +362,7 @@ function ModalReserva({ reserva, proveedores, clientes, cuentasBancarias, user, 
       { id: 1, nombre: "Guido Finkelstein" },
       { id: 2, nombre: "Ruthy Tuchsznajder" },
       { id: 3, nombre: "Julieta Zubeldia" },
+      { id: 4, nombre: "Guido Ramer" },
     ]);
   }, []);
 
@@ -1794,6 +1796,115 @@ function Finanzas({ cuentasBancarias, proveedores, user, onSave }) {
 
 // ══ ALERTAS ══
 const ALERTA_CFG = { vencimiento_pago: { icon: "💳", color: "#ef4444" }, vencimiento_cobro: { icon: "💵", color: "#f97316" }, vencimiento_reserva: { icon: "⏰", color: "#f59e0b" }, viaje_proximo: { icon: "✈️", color: "#3b82f6" }, sin_seguro: { icon: "🛡️", color: "#8b5cf6" } };
+const VENDEDORES_LISTA = ["Guido Finkelstein", "Ruthy Tuchsznajder", "Julieta Zubeldia", "Guido Ramer"];
+
+function Vendedores({ reservas }) {
+  const [sel, setSel] = useState(null);
+  const [filtroEstado, setFiltroEstado] = useState("");
+
+  const stats = VENDEDORES_LISTA.map(v => {
+    const rs = reservas.filter(r => r.vendedor === v && r.estado !== "Cancelada");
+    const usd = rs.filter(r => r.moneda === "USD");
+    const ars = rs.filter(r => r.moneda === "ARS");
+    return {
+      nombre: v,
+      iniciales: v.split(" ").map(x => x[0]).join("").slice(0, 2),
+      total: rs.length,
+      ventaUSD: usd.reduce((s, r) => s + (r.venta || 0), 0),
+      ventaARS: ars.reduce((s, r) => s + (r.venta || 0), 0),
+      gananciaUSD: usd.reduce((s, r) => s + ((r.venta || 0) - (r.neto || 0)), 0),
+      gananciaARS: ars.reduce((s, r) => s + ((r.venta || 0) - (r.neto || 0)), 0),
+      pendienteUSD: usd.reduce((s, r) => s + (r.saldo_pendiente || 0), 0),
+      reservas: rs,
+    };
+  });
+
+  const selStats = sel ? stats.find(s => s.nombre === sel) : null;
+  const reservasFiltradas = selStats ? selStats.reservas.filter(r => !filtroEstado || r.estado === filtroEstado) : [];
+
+  return (
+    <div>
+      <div style={S.pt}>Vendedores</div>
+      <div style={{ ...S.ps, marginBottom: 24 }}>Resumen de ventas por vendedor</div>
+
+      {/* Cards resumen */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: 14, marginBottom: 28 }}>
+        {stats.map(v => (
+          <div key={v.nombre} onClick={() => setSel(sel === v.nombre ? null : v.nombre)}
+            style={{ ...S.card, cursor: "pointer", borderColor: sel === v.nombre ? "#3b82f6" : "#1e3a5f", background: sel === v.nombre ? "#0a1f3a" : "#080f1a" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 14 }}>
+              <div style={{ width: 40, height: 40, borderRadius: "50%", background: "#1e3a5f", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, fontSize: 14, color: "#c9a84c", flexShrink: 0 }}>{v.iniciales}</div>
+              <div>
+                <div style={{ fontWeight: 700, fontSize: 14 }}>{v.nombre}</div>
+                <div style={{ fontSize: 11, color: "#4a6fa5" }}>{v.total} reserva{v.total !== 1 ? "s" : ""}</div>
+              </div>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+              <div style={{ background: "#0f2040", borderRadius: 8, padding: "8px 10px" }}>
+                <div style={{ fontSize: 9, color: "#4a6fa5", marginBottom: 2 }}>VENTA USD</div>
+                <div style={{ fontSize: 14, fontWeight: 700, color: "#c9a84c" }}>{fmt(v.ventaUSD, "USD")}</div>
+              </div>
+              <div style={{ background: "#0f2040", borderRadius: 8, padding: "8px 10px" }}>
+                <div style={{ fontSize: 9, color: "#4a6fa5", marginBottom: 2 }}>GANANCIA USD</div>
+                <div style={{ fontSize: 14, fontWeight: 700, color: "#10b981" }}>{fmt(v.gananciaUSD, "USD")}</div>
+              </div>
+              {v.ventaARS > 0 && <>
+                <div style={{ background: "#0f2040", borderRadius: 8, padding: "8px 10px" }}>
+                  <div style={{ fontSize: 9, color: "#4a6fa5", marginBottom: 2 }}>VENTA ARS</div>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: "#c9a84c" }}>{fmt(v.ventaARS, "ARS")}</div>
+                </div>
+                <div style={{ background: "#0f2040", borderRadius: 8, padding: "8px 10px" }}>
+                  <div style={{ fontSize: 9, color: "#4a6fa5", marginBottom: 2 }}>GANANCIA ARS</div>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: "#10b981" }}>{fmt(v.gananciaARS, "ARS")}</div>
+                </div>
+              </>}
+              {v.pendienteUSD > 0 && (
+                <div style={{ background: "#1a0f0f", borderRadius: 8, padding: "8px 10px", gridColumn: "span 2" }}>
+                  <div style={{ fontSize: 9, color: "#4a6fa5", marginBottom: 2 }}>PENDIENTE COBRO PROV.</div>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: "#ef4444" }}>{fmt(v.pendienteUSD, "USD")}</div>
+                </div>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Detalle reservas del vendedor seleccionado */}
+      {selStats && (
+        <div>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+            <div style={S.stitle}>Reservas de {sel}</div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <select style={{ ...S.sel, width: "auto" }} value={filtroEstado} onChange={e => setFiltroEstado(e.target.value)}>
+                <option value="">Todos los estados</option>
+                {ESTADOS_RESERVA.map(e => <option key={e}>{e}</option>)}
+              </select>
+              <button style={btnS("ghost", "sm")} onClick={() => setSel(null)}>✕ Cerrar</button>
+            </div>
+          </div>
+          <Tabla
+            cols={["Código", "Pasajero", "Destino / Proveedor", "Fechas", "Venta", "Ganancia", "Estado"]}
+            rows={reservasFiltradas.sort((a, b) => (b.created_at || "").localeCompare(a.created_at || "")).map(r => (
+              <tr key={r.id} style={{ background: "#0d1829" }}>
+                <td style={{ ...S.td, fontFamily: "monospace", color: "#c9a84c", fontSize: 11 }}>
+                  <div>{r.codigo}</div>
+                  {r.cod_proveedor && <div style={{ fontSize: 9, color: "#4a6fa5" }}>🏷 {r.cod_proveedor}</div>}
+                </td>
+                <td style={S.td}><div style={{ fontWeight: 500 }}>{r.pasajero_nombre}</div><div style={{ fontSize: 10, color: "#4a6fa5" }}>{r.tipo}</div></td>
+                <td style={S.td}><div>{r.destino}</div><div style={{ fontSize: 10, color: "#4a6fa5" }}>{r.proveedor_nombre}</div></td>
+                <td style={{ ...S.td, fontSize: 11, color: "#7a9cc8" }}>{fmtD(r.fecha_in)}{r.fecha_out ? " → " + fmtD(r.fecha_out) : ""}</td>
+                <td style={{ ...S.td, fontWeight: 600 }}>{fmt(r.venta, r.moneda)}</td>
+                <td style={{ ...S.td, color: "#10b981", fontWeight: 600 }}>{fmt((r.venta || 0) - (r.neto || 0), r.moneda)}</td>
+                <td style={S.td}><Badge estado={r.estado} /></td>
+              </tr>
+            ))}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Alertas({ alertas, onDescartar }) {
   const urgentes = alertas.filter(a => a.urgente);
   const normales = alertas.filter(a => !a.urgente);
@@ -2365,6 +2476,7 @@ export default function App() {
           {page === "clientes" && <Clientes onSave={recargarDatos} />}
           {page === "proveedores" && <Proveedores proveedores={proveedores} onSave={recargarDatos} />}
           {page === "finanzas" && <Finanzas cuentasBancarias={cuentasBancarias} proveedores={proveedores} user={user} onSave={recargarDatos} />}
+          {page === "vendedores" && <Vendedores reservas={reservasDash} />}
           {page === "alertas" && <Alertas alertas={alertasAll} onDescartar={descartarAlerta} />}
           {page === "documentos" && <Documentos />}
         </div>
