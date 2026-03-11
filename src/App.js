@@ -1214,6 +1214,19 @@ function ModalProveedor({ proveedor, onSave, onClose }) {
 
 function Proveedores({ proveedores, onSave }) {
   const [modal, setModal] = useState(null);
+  const [sel, setSel] = useState(null);
+  const [detalle, setDetalle] = useState({ reservas: [], movimientos: [], loading: false });
+
+  async function cargarDetalle(p) {
+    if (sel?.id === p.id) { setSel(null); return; }
+    setSel(p);
+    setDetalle({ reservas: [], movimientos: [], loading: true });
+    const [{ data: reservas }, { data: movimientos }] = await Promise.all([
+      supabase.from("reservas").select("id,codigo,pasajero_nombre,destino,moneda,neto,venta,saldo_pendiente,estado,fecha_in").eq("proveedor_id", p.id).order("fecha_in", { ascending: false }),
+      supabase.from("movimientos").select("*").eq("proveedor_id", p.id).order("fecha", { ascending: false }),
+    ]);
+    setDetalle({ reservas: reservas || [], movimientos: movimientos || [], loading: false });
+  }
 
   return (
     <div>
@@ -1221,25 +1234,105 @@ function Proveedores({ proveedores, onSave }) {
         <div style={S.pt}>Proveedores</div>
         <button style={btnS("pri")} onClick={() => setModal("nuevo")}>+ Nuevo proveedor</button>
       </div>
-      <div style={{ ...S.ps, marginBottom: 20 }}>Saldos de cuentas</div>
+      <div style={{ ...S.ps, marginBottom: 20 }}>Saldos de cuentas — clic para ver detalle</div>
       {proveedores.map(p => (
-        <div key={p.id} style={{ ...S.card, marginBottom: 12 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
-            <div>
-              <div style={{ fontWeight: 700 }}>{p.nombre}</div>
-              <div style={{ fontSize: 11, color: "#4a6fa5" }}>{p.tipo}</div>
-            </div>
-            <button style={btnS("ghost", "sm")} onClick={() => setModal(p)}>Editar</button>
-          </div>
-          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 10 }}>
-            {(p.cuentas_proveedor || []).map(c => (
-              <div key={c.id} style={{ padding: "10px 14px", background: "#080f1a", borderRadius: 8, minWidth: 160 }}>
-                <div style={{ fontSize: 10, color: "#4a6fa5", marginBottom: 4 }}>{c.nombre}</div>
-                <div style={{ fontSize: 18, fontWeight: 700, color: (c.saldo || 0) >= 0 ? "#10b981" : "#ef4444" }}>{fmt(c.saldo || 0, c.moneda)}</div>
+        <div key={p.id} style={{ marginBottom: 12 }}>
+          <div style={{ ...S.card, cursor: "pointer", borderColor: sel?.id === p.id ? "#3b82f6" : "#1e3a5f", background: sel?.id === p.id ? "#0a1f3a" : "#080f1a" }}
+            onClick={() => cargarDetalle(p)}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+              <div>
+                <div style={{ fontWeight: 700 }}>{p.nombre}</div>
+                <div style={{ fontSize: 11, color: "#4a6fa5" }}>{p.tipo}</div>
               </div>
-            ))}
-            {(p.cuentas_proveedor || []).length === 0 && <div style={{ fontSize: 11, color: "#4a6fa5" }}>Sin cuentas cargadas</div>}
+              <div style={{ display: "flex", gap: 8 }}>
+                <button style={btnS("ghost", "sm")} onClick={e => { e.stopPropagation(); setModal(p); }}>Editar</button>
+                <span style={{ fontSize: 11, color: "#3b82f6" }}>{sel?.id === p.id ? "▲" : "▼"}</span>
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 10 }}>
+              {(p.cuentas_proveedor || []).map(c => (
+                <div key={c.id} style={{ padding: "10px 14px", background: "#080f1a", borderRadius: 8, minWidth: 160 }}>
+                  <div style={{ fontSize: 10, color: "#4a6fa5", marginBottom: 4 }}>{c.nombre}</div>
+                  <div style={{ fontSize: 18, fontWeight: 700, color: (c.saldo || 0) >= 0 ? "#10b981" : "#ef4444" }}>{fmt(c.saldo || 0, c.moneda)}</div>
+                </div>
+              ))}
+              {(p.cuentas_proveedor || []).length === 0 && <div style={{ fontSize: 11, color: "#4a6fa5" }}>Sin cuentas cargadas</div>}
+            </div>
           </div>
+
+          {/* Detalle expandible */}
+          {sel?.id === p.id && (
+            <div style={{ background: "#060d1a", border: "1px solid #1e3a5f", borderTop: "none", borderRadius: "0 0 12px 12px", padding: 16 }}>
+              {detalle.loading ? (
+                <div style={{ fontSize: 12, color: "#4a6fa5", textAlign: "center", padding: 20 }}>Cargando...</div>
+              ) : (
+                <>
+                  {/* Reservas */}
+                  <div style={{ marginBottom: 20 }}>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: "#7a9cc8", marginBottom: 10 }}>
+                      Reservas ({detalle.reservas.length})
+                    </div>
+                    {detalle.reservas.length === 0 ? (
+                      <div style={{ fontSize: 11, color: "#4a6fa5" }}>Sin reservas</div>
+                    ) : (
+                      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
+                        <thead>
+                          <tr>
+                            {["Código", "Pasajero", "Destino", "Neto", "Venta", "Saldo pend.", "Estado"].map(h => (
+                              <th key={h} style={{ textAlign: "left", color: "#4a6fa5", fontWeight: 600, padding: "4px 8px", borderBottom: "1px solid #1e3a5f" }}>{h}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {detalle.reservas.map(r => (
+                            <tr key={r.id} style={{ borderBottom: "1px solid #0f2040" }}>
+                              <td style={{ ...S.td, color: "#c9a84c", fontSize: 11 }}>{r.codigo}</td>
+                              <td style={S.td}>{r.pasajero_nombre}</td>
+                              <td style={S.td}>{r.destino}</td>
+                              <td style={S.td}>{fmt(r.neto || 0, r.moneda)}</td>
+                              <td style={S.td}>{fmt(r.venta || 0, r.moneda)}</td>
+                              <td style={{ ...S.td, color: (r.saldo_pendiente || 0) > 0 ? "#ef4444" : "#10b981" }}>{fmt(r.saldo_pendiente || 0, r.moneda)}</td>
+                              <td style={S.td}><span style={{ fontSize: 10, padding: "2px 6px", borderRadius: 4, background: "#1e3a5f" }}>{r.estado}</span></td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    )}
+                  </div>
+
+                  {/* Movimientos */}
+                  <div>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: "#7a9cc8", marginBottom: 10 }}>
+                      Pagos registrados ({detalle.movimientos.length})
+                    </div>
+                    {detalle.movimientos.length === 0 ? (
+                      <div style={{ fontSize: 11, color: "#4a6fa5" }}>Sin movimientos</div>
+                    ) : (
+                      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
+                        <thead>
+                          <tr>
+                            {["Fecha", "Concepto", "Monto", "Reserva"].map(h => (
+                              <th key={h} style={{ textAlign: "left", color: "#4a6fa5", fontWeight: 600, padding: "4px 8px", borderBottom: "1px solid #1e3a5f" }}>{h}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {detalle.movimientos.map(m => (
+                            <tr key={m.id} style={{ borderBottom: "1px solid #0f2040" }}>
+                              <td style={{ ...S.td, color: "#7a9cc8" }}>{fmtD(m.fecha)}</td>
+                              <td style={S.td}>{m.concepto}</td>
+                              <td style={{ ...S.td, color: "#ef4444", fontWeight: 600 }}>{fmt(m.monto_origen, m.moneda_origen)}</td>
+                              <td style={{ ...S.td, color: "#c9a84c" }}>{m.reserva_cod || "—"}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
+          )}
         </div>
       ))}
       {modal && <ModalProveedor proveedor={modal === "nuevo" ? null : modal} onSave={() => { setModal(null); if (onSave) onSave(); }} onClose={() => setModal(null)} />}
