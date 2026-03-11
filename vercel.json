@@ -1,5 +1,6 @@
 {
   "functions": {
-    "api/send-doc.py": { "maxDuration": 30 }
+    "api/send-doc.py": { "runtime": "python3.9", "maxDuration": 60 },
+    "api/send-email.js": { "maxDuration": 30 }
   }
 }
