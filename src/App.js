@@ -431,7 +431,7 @@ function BuscadorCobrarA({ clientes, cobrarAId, cobrarANombre, onChange }) {
 
 function ModalReserva({ reserva, proveedores, clientes, cuentasBancarias, user, onSave, onClose }) {
   const esNueva = !reserva;
-  const [f, setF] = useState(reserva ? { ...FORM_EMPTY, ...reserva, proveedor_id: String(reserva.proveedor_id || ""), neto: reserva.neto || "", venta: reserva.venta || "" } : { ...FORM_EMPTY, vendedor: user?.nombre || "" });
+  const [f, setF] = useState(reserva ? { ...FORM_EMPTY, ...reserva, vendedor: resolverVendedor(reserva.vendedor), proveedor_id: String(reserva.proveedor_id || ""), neto: reserva.neto || "", venta: reserva.venta || "" } : { ...FORM_EMPTY, vendedor: resolverVendedor(user?.nombre) });
   const [tab, setTab] = useState(0);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState({});
@@ -600,7 +600,6 @@ function ModalReserva({ reserva, proveedores, clientes, cuentasBancarias, user, 
                   <select style={S.sel} value={f.vendedor} onChange={e => set("vendedor", e.target.value)}>
                     <option value="">Seleccionar...</option>
                     {vendedores.map(v => <option key={v.id} value={v.nombre}>{v.nombre}</option>)}
-                    {f.vendedor && !vendedores.find(v => v.nombre === f.vendedor) && <option value={f.vendedor}>{f.vendedor}</option>}
                   </select>
                 </div>
               </div>
@@ -1947,6 +1946,8 @@ function Finanzas({ cuentasBancarias, proveedores, user, onSave }) {
 // ══ ALERTAS ══
 const ALERTA_CFG = { vencimiento_pago: { icon: "💳", color: "#ef4444" }, vencimiento_cobro: { icon: "💵", color: "#f97316" }, vencimiento_reserva: { icon: "⏰", color: "#f59e0b" }, viaje_proximo: { icon: "✈️", color: "#3b82f6" }, sin_seguro: { icon: "🛡️", color: "#8b5cf6" } };
 const VENDEDORES_LISTA = ["Guido Finkelstein", "Ruthy Tuchsznajder", "Julieta Zubeldia", "Guido Ramer"];
+const USUARIO_A_VENDEDOR = { "guido": "Guido Finkelstein", "ruthy": "Ruthy Tuchsznajder", "julieta": "Julieta Zubeldia", "guido_ramer": "Guido Ramer" };
+function resolverVendedor(nombre) { return USUARIO_A_VENDEDOR[nombre?.toLowerCase()] || nombre || ""; }
 
 function Vendedores({ reservas }) {
   const [sel, setSel] = useState(null);
