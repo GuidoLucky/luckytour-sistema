@@ -1,5 +1,6 @@
 import json
 import urllib.request
+import urllib.error
 from http.server import BaseHTTPRequestHandler
 
 RAILWAY_URL = "https://comparador-vuelos-production.up.railway.app/generar-doc"
@@ -13,7 +14,6 @@ class handler(BaseHTTPRequestHandler):
         reserva = body.get("reserva", {})
 
         try:
-            # Railway espera { tipo, datos }
             payload = json.dumps({ "tipo": tipo, "datos": reserva }).encode()
             req = urllib.request.Request(
                 RAILWAY_URL,
@@ -21,13 +21,25 @@ class handler(BaseHTTPRequestHandler):
                 headers={"Content-Type": "application/json"},
                 method="POST"
             )
-            with urllib.request.urlopen(req, timeout=90) as resp:
-                result = json.loads(resp.read())
+            try:
+                with urllib.request.urlopen(req, timeout=90) as resp:
+                    raw = resp.read()
+            except urllib.error.HTTPError as e:
+                raw = e.read()
+                self._respond({"ok": False, "error": f"Railway HTTP {e.code}: {raw[:300].decode('utf-8','replace')}"})
+                return
+
+            # Mostrar raw en el error si falla el parse
+            try:
+                result = json.loads(raw)
+            except Exception:
+                self._respond({"ok": False, "error": f"Railway respuesta no-JSON: {raw[:300].decode('utf-8','replace')}"})
+                return
 
             if not result.get("ok"):
-                raise Exception(result.get("error", "Error en Railway"))
+                self._respond({"ok": False, "error": result.get("error", "Error en Railway")})
+                return
 
-            # Construir subject, filename y nombre para que el frontend los use
             nombre_pax  = reserva.get("pasajero_nombre", "Pasajero")
             codigo      = reserva.get("codigo", "")
             destino     = reserva.get("destino", "")
@@ -39,19 +51,19 @@ class handler(BaseHTTPRequestHandler):
                 subject  = f"Voucher de viaje — {destino} · {codigo}"
                 filename = f"voucher_{codigo}.pdf"
 
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json')
-            self.end_headers()
-            self.wfile.write(json.dumps({
+            self._respond({
                 "ok":       True,
                 "pdf":      result["pdf"],
                 "subject":  subject,
                 "filename": filename,
                 "nombre":   nombre_pax,
-            }).encode())
+            })
 
         except Exception as e:
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json')
-            self.end_headers()
-            self.wfile.write(json.dumps({"ok": False, "error": str(e)}).encode())
+            self._respond({"ok": False, "error": str(e)})
+
+    def _respond(self, data):
+        self.send_response(200)
+        self.send_header('Content-Type', 'application/json')
+        self.end_headers()
+        self.wfile.write(json.dumps(data).encode())
