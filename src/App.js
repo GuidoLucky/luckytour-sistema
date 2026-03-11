@@ -1144,6 +1144,8 @@ function ModalProveedor({ proveedor, onSave, onClose }) {
   const [nombre, setNombre] = useState(proveedor?.nombre || "");
   const [tipo, setTipo] = useState(proveedor?.tipo || "");
   const [saving, setSaving] = useState(false);
+  const [cuentas, setCuentas] = useState(proveedor?.cuentas_proveedor || []);
+  const [ajustes, setAjustes] = useState({});
 
   async function guardar() {
     if (!nombre.trim()) { alert("Ingresá un nombre"); return; }
@@ -1161,6 +1163,13 @@ function ModalProveedor({ proveedor, onSave, onClose }) {
     } else {
       const { error } = await supabase.from("proveedores").update({ nombre: nombre.trim(), tipo: tipo.trim() }).eq("id", proveedor.id);
       if (error) { setSaving(false); alert("Error: " + error.message); return; }
+      // Aplicar ajustes de saldo
+      for (const [cuentaId, val] of Object.entries(ajustes)) {
+        const nuevo = parseFloat(val);
+        if (!isNaN(nuevo)) {
+          await supabase.from("cuentas_proveedor").update({ saldo: nuevo }).eq("id", cuentaId);
+        }
+      }
     }
     setSaving(false);
     onSave();
@@ -1176,6 +1185,25 @@ function ModalProveedor({ proveedor, onSave, onClose }) {
         <div style={S.fg}><label style={S.fl}>Nombre *</label><input style={S.inp} value={nombre} onChange={e => setNombre(e.target.value)} placeholder="Ej: Tucano Tours" /></div>
         <div style={S.fg}><label style={S.fl}>Tipo / Rubro</label><input style={S.inp} value={tipo} onChange={e => setTipo(e.target.value)} placeholder="Ej: Hotel, Aéreo, Seguro..." /></div>
         {esNuevo && <div style={{ fontSize: 11, color: "#4a6fa5", marginBottom: 14 }}>Se crearán automáticamente las cuentas en USD y ARS.</div>}
+        {!esNuevo && cuentas.length > 0 && (
+          <div style={{ marginBottom: 16 }}>
+            <div style={{ fontSize: 12, color: "#7a9cc8", marginBottom: 8, fontWeight: 600 }}>Ajuste manual de saldo</div>
+            {cuentas.map(c => (
+              <div key={c.id} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                <div style={{ fontSize: 12, color: "#4a6fa5", minWidth: 120 }}>{c.nombre}</div>
+                <input
+                  style={{ ...S.inp, width: 120 }}
+                  type="number"
+                  placeholder={String(c.saldo || 0)}
+                  value={ajustes[c.id] !== undefined ? ajustes[c.id] : ""}
+                  onChange={e => setAjustes(prev => ({ ...prev, [c.id]: e.target.value }))}
+                />
+                <div style={{ fontSize: 10, color: "#4a6fa5" }}>actual: {fmt(c.saldo || 0, c.moneda)}</div>
+              </div>
+            ))}
+            <div style={{ fontSize: 10, color: "#4a6fa5" }}>Dejá vacío para no modificar el saldo.</div>
+          </div>
+        )}
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
           <button style={btnS("ghost")} onClick={onClose}>Cancelar</button>
           <button style={{ ...btnS("pri"), opacity: saving ? 0.7 : 1 }} onClick={guardar} disabled={saving}>{saving ? "Guardando..." : esNuevo ? "✓ Crear" : "✓ Guardar"}</button>
@@ -1324,15 +1352,34 @@ function ModalMovimiento({ proveedores, cuentasBancarias, user, onSave, onClose 
     if (error) { setSaving(false); alert("Error: " + error.message); return; }
 
     // Actualizar saldos de cada reserva según distribución
+    const tc = parseFloat(f.tc) || 1;
     for (const { r, paga, nuevoSaldo } of distribucion) {
       if (f.tipo === "pago_proveedor") {
         const upd = { saldo_pendiente: Math.max(nuevoSaldo, 0) };
         if (nuevoSaldo <= 0) upd.estado = "Pagada";
         await supabase.from("reservas").update(upd).eq("id", r.id);
-        // Actualizar saldo cuenta proveedor
-        if (f.cuenta_proveedor_id) {
-          const { data: cp } = await supabase.from("cuentas_proveedor").select("saldo").eq("id", f.cuenta_proveedor_id).single();
-          if (cp) await supabase.from("cuentas_proveedor").update({ saldo: (cp.saldo || 0) + paga }).eq("id", f.cuenta_proveedor_id);
+
+        // Determinar cuenta proveedor a actualizar: la seleccionada, o auto-detectar por moneda de la reserva
+        let cuentaId = f.cuenta_proveedor_id;
+        if (!cuentaId && f.proveedor_id) {
+          const { data: cuentas } = await supabase.from("cuentas_proveedor")
+            .select("id,moneda,saldo").eq("proveedor_id", parseInt(f.proveedor_id));
+          const match = (cuentas || []).find(c => c.moneda === r.moneda);
+          if (match) cuentaId = match.id;
+        }
+
+        if (cuentaId) {
+          const { data: cp } = await supabase.from("cuentas_proveedor").select("saldo,moneda").eq("id", cuentaId).single();
+          if (cp) {
+            // paga está en la moneda de la reserva (r.moneda)
+            // cp.moneda puede ser diferente → convertir si hace falta
+            let pagaEnCuenta = paga;
+            if (cp.moneda !== r.moneda) {
+              if (r.moneda === "USD" && cp.moneda === "ARS") pagaEnCuenta = paga * tc;
+              else if (r.moneda === "ARS" && cp.moneda === "USD") pagaEnCuenta = paga / tc;
+            }
+            await supabase.from("cuentas_proveedor").update({ saldo: (cp.saldo || 0) + pagaEnCuenta }).eq("id", cuentaId);
+          }
         }
       }
       // Para cobro_cliente el saldo se maneja vía movimientos, no hay campo en reservas
@@ -1341,8 +1388,16 @@ function ModalMovimiento({ proveedores, cuentasBancarias, user, onSave, onClose 
     // Si no hay reservas seleccionadas pero es pago_proveedor con cuenta, igual actualizar
     if (f.tipo === "pago_proveedor" && reservasSel.length === 0 && f.cuenta_proveedor_id) {
       const montoDesc = parseFloat(f.monto_origen);
-      const { data: cp } = await supabase.from("cuentas_proveedor").select("saldo").eq("id", f.cuenta_proveedor_id).single();
-      if (cp) await supabase.from("cuentas_proveedor").update({ saldo: (cp.saldo || 0) + montoDesc }).eq("id", f.cuenta_proveedor_id);
+      const { data: cp } = await supabase.from("cuentas_proveedor").select("saldo,moneda").eq("id", f.cuenta_proveedor_id).single();
+      if (cp) {
+        // Convertir monto_origen a la moneda de la cuenta si hace falta
+        let montoEnCuenta = montoDesc;
+        if (f.moneda_origen !== cp.moneda) {
+          if (f.moneda_origen === "ARS" && cp.moneda === "USD") montoEnCuenta = montoDesc / tc;
+          else if (f.moneda_origen === "USD" && cp.moneda === "ARS") montoEnCuenta = montoDesc * tc;
+        }
+        await supabase.from("cuentas_proveedor").update({ saldo: (cp.saldo || 0) + montoEnCuenta }).eq("id", f.cuenta_proveedor_id);
+      }
     }
 
     // Actualizar saldo cuenta bancaria
