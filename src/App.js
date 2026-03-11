@@ -2080,6 +2080,7 @@ function Documentos() {
     }
 
     // Registrar en BD
+    const asunto = pdfData?.subject || (tipo === "confirmacion" ? "Confirmación de reserva" : "Voucher de viaje");
     await supabase.from("reserva_docs").insert([{
       reserva_id: r.id, tipo, asunto, para_mail: r.pasajero_mail,
       enviado: mailOk,
