@@ -1028,7 +1028,6 @@ function Reservas({ proveedores, clientes, cuentasBancarias, user, onSave }) {
     } catch (e) {
       console.warn("[prefill] Error al parsear datos del comparador:", e.message);
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user]);
   const lista = reservas.filter(r => { const s = q.toLowerCase(); return (!q || (r.pasajero_nombre || "").toLowerCase().includes(s) || (r.codigo || "").toLowerCase().includes(s) || (r.destino || "").toLowerCase().includes(s) || (r.proveedor_nombre || "").toLowerCase().includes(s)) && (!filtroEstado || r.estado === filtroEstado); });
   const [confirmCancel, setConfirmCancel] = useState(null); // reserva a cancelar
