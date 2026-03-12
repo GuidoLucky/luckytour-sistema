@@ -429,9 +429,14 @@ function BuscadorCobrarA({ clientes, cobrarAId, cobrarANombre, onChange }) {
   );
 }
 
-function ModalReserva({ reserva, proveedores, clientes, cuentasBancarias, user, onSave, onClose }) {
+function ModalReserva({ reserva, prefillData, proveedores, clientes, cuentasBancarias, user, onSave, onClose }) {
   const esNueva = !reserva;
-  const [f, setF] = useState(reserva ? { ...FORM_EMPTY, ...reserva, vendedor: resolverVendedor(reserva.vendedor), proveedor_id: String(reserva.proveedor_id || ""), neto: reserva.neto || "", venta: reserva.venta || "" } : { ...FORM_EMPTY, vendedor: resolverVendedor(user?.nombre) });
+  const initForm = prefillData
+    ? { ...prefillData, vendedor: resolverVendedor(prefillData.vendedor || user?.nombre) }
+    : reserva
+      ? { ...FORM_EMPTY, ...reserva, vendedor: resolverVendedor(reserva.vendedor), proveedor_id: String(reserva.proveedor_id || ""), neto: reserva.neto || "", venta: reserva.venta || "" }
+      : { ...FORM_EMPTY, vendedor: resolverVendedor(user?.nombre) };
+  const [f, setF] = useState(initForm);
   const [tab, setTab] = useState(0);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState({});
@@ -985,6 +990,46 @@ function Reservas({ proveedores, clientes, cuentasBancarias, user, onSave }) {
   const [modal, setModal] = useState(null);
   const cargar = useCallback(async () => { setLoading(true); const { data } = await supabase.from("reservas").select("*").order("created_at", { ascending: false }); setReservas(data || []); setLoading(false); }, []);
   useEffect(() => { cargar(); }, [cargar]);
+
+  // ── Prefill desde comparador de vuelos ──────────────────────────────────
+  useEffect(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const encoded = params.get("prefill");
+      if (!encoded) return;
+      const datos = JSON.parse(decodeURIComponent(escape(atob(encoded))));
+      if (datos._origen !== "comparador") return;
+      // Limpiar la URL sin recargar
+      window.history.replaceState({}, "", window.location.pathname);
+      // Pre-armar el objeto como si fuera una reserva parcial para pasarle al modal
+      const prefilled = {
+        ...FORM_EMPTY,
+        tipo: datos.tipo || "Aéreo",
+        destino: datos.destino || "",
+        pasajero_nombre: datos.pasajero_nombre || "",
+        pasajero_mail: datos.pasajero_mail || "",
+        pasajero_tel: datos.pasajero_tel || "",
+        moneda: datos.moneda || "USD",
+        neto: datos.neto ? String(datos.neto) : "",
+        venta: datos.venta ? String(datos.venta) : "",
+        adultos: datos.adultos || 1,
+        chd: datos.chd || 0,
+        inf: datos.inf || 0,
+        cod_proveedor: datos.cod_proveedor || "",
+        proveedor_id: "otro",
+        proveedor_nombre_libre: datos.proveedor_nombre_libre || "",
+        fecha_in: datos.fecha_in || "",
+        notas: datos.notas || "",
+        estado: "Borrador",
+        vendedor: user?.nombre || "",
+        _prefillFromComparador: true,
+      };
+      setModal(prefilled);
+    } catch (e) {
+      console.warn("[prefill] Error al parsear datos del comparador:", e.message);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user]);
   const lista = reservas.filter(r => { const s = q.toLowerCase(); return (!q || (r.pasajero_nombre || "").toLowerCase().includes(s) || (r.codigo || "").toLowerCase().includes(s) || (r.destino || "").toLowerCase().includes(s) || (r.proveedor_nombre || "").toLowerCase().includes(s)) && (!filtroEstado || r.estado === filtroEstado); });
   const [confirmCancel, setConfirmCancel] = useState(null); // reserva a cancelar
 
@@ -1079,7 +1124,7 @@ function Reservas({ proveedores, clientes, cuentasBancarias, user, onSave }) {
           })}
         />
       )}
-      {modal && <ModalReserva reserva={modal === "nueva" ? null : modal} proveedores={proveedores} clientes={clientes} cuentasBancarias={cuentasBancarias} user={user} onSave={() => { setModal(null); cargar(); if (onSave) onSave(); }} onClose={() => setModal(null)} />}
+      {modal && <ModalReserva reserva={modal === "nueva" ? null : (modal?._prefillFromComparador ? null : modal)} prefillData={modal?._prefillFromComparador ? modal : null} proveedores={proveedores} clientes={clientes} cuentasBancarias={cuentasBancarias} user={user} onSave={() => { setModal(null); cargar(); if (onSave) onSave(); }} onClose={() => setModal(null)} />}
       {confirmCancel && <ModalCancelacion reserva={confirmCancel.r} onConfirmar={(datos) => ejecutarCambioEstado(confirmCancel.r, "Cancelada", datos)} onClose={() => setConfirmCancel(null)} />}
     </div>
   );
